@@ -1,0 +1,35 @@
+# Example configuration for the Combo Generator:
+#   uv run deepyugioh generate --config deepyugioh.example.toml
+# Every key is optional; missing keys use the defaults shown here.
+
+workers = 8          # parallel worker processes
+validate = true      # replay every combo before it is stored
+
+[limits]             # per search (one start setup)
+max_cards = 5        # a combo may require at most this many specific cards
+min_cards = 2        # fewer is a single card's effect, not a combo
+max_depth = 80       # decisions per line
+max_nodes = 20000    # decision points per search
+time_limit = 120.0   # seconds per search
+max_choices = 128    # options per card selection
+transpositions = true
+drop_redundant = true
+allow_mset = false
+allow_sset = false
+
+[candidates]         # start setup generation
+tiers = [1, 2, 3, 4]
+opponent_boards = ["empty", "standard"]
+max_deck_neighbors = 15
+max_extra = 15
+enablers = true
+
+# Opponent boards: vanilla monsters and Normal Spells only - they must never
+# be able to act during our turn. Boards defined here replace/extend the defaults.
+[opponent_boards.standard]
+cards = [
+  { card = "Gene-Warped Warwolf", zone = "mzone", position = "faceup_attack" },
+  { card = "Pot of Greed", zone = "szone", position = "facedown" },
+  { card = "Mystical Elf", zone = "hand" },
+  { card = "Mystical Elf", zone = "hand" },
+]
