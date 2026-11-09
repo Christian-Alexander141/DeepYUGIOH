@@ -21,6 +21,7 @@ AXES = {
     "outcome": "Ergebnis: Endfeld, Störungen, Kartenvorteil, Verluste des Gegners",
     "cost": "Einsatz: benötigte Karten, Handkarten, Aktionen, LP, Normalbeschwörung",
     "consistency": "Konsistenz: Wahrscheinlichkeit, die nötigen Handkarten zu ziehen (mit Combo-Familie)",
+    "genericness": "Deckspezifität: wie allgemein die Combo einsetzbar ist (100 = in jedem Deck, 0 = nur in einem engen Kontext)",
 }
 
 

@@ -8,7 +8,7 @@
     deepyugioh aide build|stats|explain|plan|report   AIDE: effect signatures, plans, hypothesis status
     deepyugioh benchmark [--budget 300s]    tiers 1-4 against AIDE and the hybrid tier on a card subset
     deepyugioh analyze [--full]             Stufe 2: evaluate the combos of Database 1 into Database 2
-    deepyugioh analysis stats|show|top      read Database 2 (axes, profiles, best combos)
+    deepyugioh analysis stats|show|top|card|fit   read Database 2 (axes, combos, card profiles, deck fit)
     deepyugioh testmode [on|off]            show or switch test mode
     deepyugioh gui                          test GUI for tuning the generator (test mode only)
 
@@ -313,7 +313,7 @@ def cmd_analyze(args) -> int:
 def _print_profile(store, combo, prof):
     names = ", ".join(store.name(c) for c in combo.cards) if combo else "?"
     print(f"\n{names}" + (f"  [#{combo.id}, {combo.card_count} cards]" if combo else ""))
-    for axis in ("outcome", "cost", "consistency"):
+    for axis in ("outcome", "cost", "consistency", "genericness"):
         if axis in prof:
             a = prof[axis]
             score = "-" if a.score is None else f"{a.score:5.1f}"
@@ -346,7 +346,62 @@ def cmd_analysis(args) -> int:
             cid = by_sig(sig)
             _print_profile(store, combos.get(cid) if cid else None, analysis.profile(sig))
         return 0
+    if args.action == "card":
+        if not args.card:
+            raise ValueError("analysis card needs --card NAME")
+        card = store.resolve(args.card)
+        prof = analysis.card_profile(card.code)
+        if prof is None:
+            from deepyugioh.analysis import CardProfiler
+            from deepyugioh.cards.signatures import SignatureStore
+
+            prof = CardProfiler(SignatureStore()).profile(card.code).to_dict()
+        print(f"{prof['name']}: Generizität {prof['genericness']:.0f}")
+        print(f"   {prof['explanation']}")
+        print(f"   Archetypen: {', '.join(prof['archetypes']) or '-'}; Typ: {prof['race'] or '-'}; Attribut: {prof['attribute'] or '-'}")
+        return 0
+    if args.action == "fit":
+        from deepyugioh.analysis import deck_fit
+
+        deck = _deck_profile(args)
+        outcome = {sig: score for sig, _, score in analysis.axis_rows("outcome")}
+        ranked = []
+        for sig, raw, _ in analysis.axis_rows("genericness"):
+            ranked.append((deck_fit(raw, deck), outcome.get(sig) or 0.0, sig))
+        ranked.sort(reverse=True)
+        print(f"Deckprofil {deck.name}: {len(ranked)} Combos bewertet")
+        for fit, out, sig in ranked[: args.limit]:
+            cid = by_sig(sig)
+            combo = combos.get(cid) if cid else None
+            print(f"\n  Passung {fit:5.1f}, Ergebnis {out:5.1f}")
+            _print_profile(store, combo, analysis.profile(sig))
+        return 0
     raise ValueError(f"unknown analysis action {args.action}")
+
+
+def _deck_profile(args):
+    from deepyugioh.analysis import DeckProfile
+    from deepyugioh.cards.references import constants
+
+    consts = constants()
+
+    def const(prefix, name):
+        key = prefix + name.upper().replace("-", "_").replace(" ", "_").replace('"', "")
+        if key not in consts:
+            close = [k[len(prefix):] for k in consts if k.startswith(prefix) and name.upper().replace(" ", "_") in k][:5]
+            raise KeyError(f"unknown {prefix[:-1].lower()} {name!r}" + (f" (meant: {', '.join(close)}?)" if close else ""))
+        return consts[key]
+
+    arche = frozenset(const("SET_", a) for a in args.archetype or ())
+    races = attrs = 0
+    for r in args.race or ():
+        races |= const("RACE_", r)
+    for a in args.attribute or ():
+        attrs |= const("ATTRIBUTE_", a)
+    if not (arche or races or attrs):
+        raise ValueError("a deck profile needs --archetype, --race or --attribute")
+    name = ", ".join([*(args.archetype or ()), *(args.race or ()), *(args.attribute or ())])
+    return DeckProfile(arche, races, attrs, name)
 
 
 def cmd_testmode(args) -> int:
@@ -454,9 +509,13 @@ def main(argv: list[str] | None = None) -> int:
     an.set_defaults(fn=cmd_analyze)
 
     ar = sub.add_parser("analysis", help="read Database 2: stats, the profile of one combo, best combos of an axis")
-    ar.add_argument("action", choices=["stats", "show", "top"])
+    ar.add_argument("action", choices=["stats", "show", "top", "card", "fit"])
     ar.add_argument("--combo", type=int, help="show: combo id in Database 1")
-    ar.add_argument("--axis", default="outcome", choices=["outcome", "cost", "consistency"])
+    ar.add_argument("--card", help="card: card name or code")
+    ar.add_argument("--archetype", nargs="+", help="fit: deck archetypes, e.g. Blue-Eyes")
+    ar.add_argument("--race", nargs="+", help="fit: monster types, e.g. Dragon")
+    ar.add_argument("--attribute", nargs="+", help="fit: attributes, e.g. LIGHT")
+    ar.add_argument("--axis", default="outcome", choices=["outcome", "cost", "consistency", "genericness"])
     ar.add_argument("--limit", type=int, default=10)
     ar.set_defaults(fn=cmd_analysis)
 

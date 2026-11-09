@@ -29,9 +29,9 @@ from deepyugioh.cards import lua
 from deepyugioh.cards.lua import Node, Tok
 from deepyugioh.cards.references import constants
 from deepyugioh.contracts.cards import CardInfo
-from deepyugioh.contracts.effects import UNKNOWN, CardFilter, Condition, EffectSignature, Move, Trigger, summarize
+from deepyugioh.contracts.effects import UNKNOWN, CardFilter, Condition, EffectSignature, Lock, Move, Trigger, summarize
 
-EXTRACTOR_VERSION = "1"
+EXTRACTOR_VERSION = "2"  # 2: restrictions on the player (locks)
 _TYPE_DEF = re.compile(r"^\s*(TYPE_[A-Z0-9_]+)\s*=\s*(0x[0-9a-fA-F]+|\d+)", re.M)
 
 
@@ -111,6 +111,13 @@ _COST_SELF = {  # Cost.* helpers that move the card itself
 _COST_NOOP = {"Cost.SelfReveal", "Cost.Reveal", "Cost.HintSelectedEffect", "Cost.SoftOncePerChain",
               "Cost.HardOncePerChain", "aux.RemainFieldCost", "Cost.SelfChangePosition"}
 _TYPE_KINDS = {"TYPE_MONSTER": "MONSTER", "TYPE_SPELL": "SPELL", "TYPE_TRAP": "TRAP"}
+_TYPE_PREDICATES = {
+    "IsLinkMonster": "TYPE_LINK", "IsRitualMonster": "TYPE_RITUAL", "IsSynchroMonster": "TYPE_SYNCHRO",
+    "IsXyzMonster": "TYPE_XYZ", "IsFusionMonster": "TYPE_FUSION", "IsPendulumMonster": "TYPE_PENDULUM",
+    "IsEffectMonster": "TYPE_EFFECT", "IsNormalMonster": "TYPE_NORMAL", "IsTuner": "TYPE_TUNER",
+    "IsGeminiMonster": "TYPE_GEMINI", "IsSpiritMonster": "TYPE_SPIRIT", "IsToonMonster": "TYPE_TOON",
+    "IsUnionMonster": "TYPE_UNION", "IsFlipMonster": "TYPE_FLIP",
+}
 _MAX_ALTERNATIVES = 24
 
 
@@ -297,6 +304,13 @@ def _atom(call: Node, subject: str, ctx: _Ctx, depth: int) -> list[_Conj]:
     if method in ("IsTrap", "IsNormalTrap", "IsContinuousTrap", "IsCounterTrap"):
         conj.kinds = frozenset({"TRAP"})
         return [conj]
+    if method in _TYPE_PREDICATES:
+        conj.kinds = frozenset({"MONSTER"})
+        conj.type_bits = ctx.consts.get(_TYPE_PREDICATES[method], 0)
+        return [conj]
+    if method in ("IsLinkSummoned", "IsFusionSummoned", "IsSynchroSummoned", "IsXyzSummoned", "IsRitualSummoned",
+                  "IsPendulumSummoned", "IsSpecialSummoned", "IsNormalSummoned"):
+        return [conj]  # how it was summoned: state, not identity
     if method == "IsSpellTrap":
         conj.kinds = frozenset({"SPELL", "TRAP"})
         return [conj]
@@ -703,6 +717,111 @@ def _role(call: lua.Call, default: str) -> str:
     return "cost" if any("REASON_COST" in lua.text(a) for a in call.args) else default
 
 
+# ---- locks: restrictions on the player ---------------------------------------------------
+LOCK_CODES = {"EFFECT_CANNOT_SPECIAL_SUMMON": "SPECIAL_SUMMON", "EFFECT_CANNOT_SUMMON": "NORMAL_SUMMON",
+              "EFFECT_CANNOT_ACTIVATE": "ACTIVATE"}
+_SUMMON_TYPES = ("PENDULUM", "FUSION", "SYNCHRO", "XYZ", "LINK", "RITUAL")
+
+
+def _lock_from_target(kind: str, target: lua.Function | None, ctx: _Ctx, scope: str) -> Lock:
+    """Interpret the target / value function of a restriction: it returns True for what is forbidden."""
+    if target is None:
+        return Lock(kind, scope)  # no filter: everything of this kind is forbidden
+    if kind == "ACTIVATE":
+        subject = f"{target.params[1]}:GetHandler(...)" if len(target.params) > 1 else "re:GetHandler(...)"
+    else:
+        subject = target.params[1] if len(target.params) > 1 else "c"
+    rets = [r for r in lua.returns(target.body) if r]
+    source = lua.text(rets[0])[:120] if rets else ""
+    if len(rets) != 1:
+        return Lock(kind, scope, unknown=True, source=source)
+    node = lua.parse_expr(rets[0])
+    parts = node.args if node.op == "and" else [node]
+    rest = []
+    for part in parts:
+        txt = _render_node(part) if part.op != "other" else part.value
+        if part.op == "call" and part.value == f"{subject}:IsLocation" and "LOCATION_EXTRA" in txt:
+            scope = "extra"
+        elif part.op == "not" and part.args[0].op == "call" and part.args[0].value == f"{subject}:IsLocation" \
+                and "LOCATION_EXTRA" in _render_node(part.args[0]):
+            scope = "main"
+        elif any(f"SUMMON_TYPE_{t}" in txt for t in _SUMMON_TYPES) and "sum" in txt:
+            scope = next(t for t in _SUMMON_TYPES if f"SUMMON_TYPE_{t}" in txt)
+        else:
+            rest.append(part)
+    if not rest:
+        return Lock(kind, scope, source=source)
+    if all(r.op == "not" for r in rest):
+        # forbidden = not A and not B  ->  allowed = A or B
+        allowed: list = []
+        for r in rest:
+            allowed += _dnf(r.args[0], subject, ctx, 0)
+        cond, _ = _to_condition(allowed)
+        if cond is None:
+            return Lock(kind, scope, unknown=True, source=source)
+        return Lock(kind, scope, allowed=cond, source=source)
+    if not any(r.op == "not" for r in rest):
+        acc = [_Conj()]
+        for r in rest:
+            acc = [x.merge(y) for x in acc for y in _dnf(r, subject, ctx, 0)]
+        cond, _ = _to_condition([c for c in acc if not c.impossible])
+        if cond is None:
+            return Lock(kind, scope, unknown=True, source=source)
+        return Lock(kind, scope, forbidden=cond, source=source)
+    return Lock(kind, scope, unknown=True, source=source)
+
+
+def _restriction(kind: str, setters: dict, ctx: _Ctx, scope: str) -> Lock:
+    arg = setters.get("SetValue" if kind == "ACTIVATE" else "SetTarget")
+    if not arg:
+        return Lock(kind, scope)
+    fn = _fn_arg(arg, ctx)
+    if fn is None:
+        return Lock(kind, scope, unknown=True, source=lua.text(arg[0])[:60])
+    return _lock_from_target(kind, fn, ctx, scope)
+
+
+def _locks(fn: lua.Function, ctx: _Ctx, depth: int = 0) -> list[Lock]:
+    """Restrictions an effect function registers on its player (Duel.RegisterEffect(e, tp))."""
+    created: dict[str, dict] = {}
+    out = []
+    for call in lua.calls(fn.body, ("",)):
+        name = call.name
+        if name == "Effect.CreateEffect" and call.assigned_to:
+            created[call.assigned_to] = {}
+            continue
+        var, _, method = name.partition(":")
+        if var in created and method.startswith("Set"):
+            created[var][method] = call.args
+            continue
+        if name == "Duel.RegisterEffect" and len(call.args) >= 2:
+            setters = created.get(lua.text(call.args[0]))
+            if setters is None or lua.text(call.args[1]) not in ("tp", "p", "rp"):
+                continue
+            codes = _names(setters.get("SetCode", []))
+            for code in codes:
+                if code in LOCK_CODES:
+                    out.append(_restriction(LOCK_CODES[code], setters, ctx, "all"))
+            continue
+        if method == "RegisterEffect" and call.args:
+            # registered on a card (e.g. a token or the card itself) that affects its controller's side
+            setters = created.get(lua.text(call.args[0]))
+            tr = [lua.text(a) for a in (setters or {}).get("SetTargetRange", [])]
+            absolute = [lua.text(a) for a in (setters or {}).get("SetAbsoluteRange", [])]
+            if setters is not None and ((tr and tr[0] == "1") or (len(absolute) > 1 and absolute[1] == "1")):
+                for code in _names(setters.get("SetCode", [])):
+                    if code in LOCK_CODES:
+                        out.append(_restriction(LOCK_CODES[code], setters, ctx, "field"))
+            continue
+        if name in ctx.funcs and depth < 2 and name != "s.initial_effect":
+            out += _locks(ctx.funcs[name], ctx, depth + 1)
+    return out
+
+
+def _uses_activity_counter(fns) -> bool:
+    return any(t.text in ("GetCustomActivityCount", "GetActivityCount") for f in fns if f is not None for t in f.body)
+
+
 # ---- effects --------------------------------------------------------------------------
 @dataclass
 class _Raw:
@@ -876,6 +995,23 @@ def _signature(raw: _Raw, card: CardInfo, ctx: _Ctx) -> EffectSignature:
     if any(m.dst == UNKNOWN for m in moves + costs):
         unknown.append("destination")
 
+    # restrictions on the player
+    fns = [_fn_arg(s.get(k), ctx) for k in ("SetCost", "SetTarget", "SetOperation", "SetCondition")]
+    locks: list[Lock] = []
+    for fn in fns:
+        if fn is not None:
+            locks += _locks(fn, ctx)
+    if kind == "CONTINUOUS" and any(c in LOCK_CODES for c in codes):
+        tr = [lua.text(a) for a in s.get("SetTargetRange", [])]
+        if tr and tr[0] == "1":   # affects its own controller
+            code = next(c for c in codes if c in LOCK_CODES)
+            locks.append(_restriction(LOCK_CODES[code], s, ctx, "field"))
+    if locks and _uses_activity_counter(fns):
+        locks = [replace(x, whole_turn=True) for x in locks]
+    locks = list(dict.fromkeys(locks))
+    if any(x.unknown for x in locks):
+        unknown.append("restriction")
+
     unknown = list(dict.fromkeys(unknown + [u for m in moves + costs if m.what for u in m.what.unknown]))
     restrictions = list(dict.fromkeys(restrictions))
     usable = kind in ("ACTIVATE", "IGNITION", "QUICK", "TRIGGER", "SUMMON_PROC")
@@ -884,7 +1020,7 @@ def _signature(raw: _Raw, card: CardInfo, ctx: _Ctx) -> EffectSignature:
         confidence = min(confidence, 0.5)
     return EffectSignature(
         f"{card.code}:{raw.idx}", card.code, kind, location, trigger, tuple(conditions), tuple(costs), tuple(moves),
-        draws, lp, count_limit, cats, tuple(restrictions), tuple(unknown), "lua-static", confidence,
+        draws, lp, count_limit, cats, tuple(restrictions), tuple(unknown), "lua-static", confidence, tuple(locks),
     )
 
 
@@ -1018,8 +1154,8 @@ class SignatureStore:
         self.path = path or paths.card_db()
         self.db = sqlite3.connect(self.path)
         self.db.executescript(SCHEMA)
-        if build_if_missing and self.version() == "unbuilt":
-            self.build()
+        if build_if_missing and not self.version().startswith(f"{EXTRACTOR_VERSION}-"):
+            self.build()  # missing, or written by an older extractor
         self._cards: dict[int, CardInfo] | None = None
         self._sigs: dict[int, list[EffectSignature]] | None = None
         self._refs: dict[int, tuple[set[int], set[int]]] | None = None

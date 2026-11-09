@@ -645,6 +645,7 @@ gen.coverage()                                 # Abdeckung pro Stufe</code></pre
   <tr><td><code>trigger</code></td><td>Ereignis und ob es dieser Karte passieren muss</td><td><code>TO_GRAVE</code>, nur diese Karte, Pflicht</td></tr>
   <tr><td><code>conditions</code></td><td>erkannte Voraussetzungen, sonst <code>UNKNOWN:&lt;Funktion&gt;</code></td><td><code>PREVIOUS:MZONE+SZONE</code></td></tr>
   <tr><td><code>costs</code>, <code>moves</code></td><td>Bewegungen „Karten mit Bedingung X von Zone A nach Zone B“, als Kosten oder Effekt; <code>what = None</code> heißt „diese Karte“</td><td>Dark Grepher: Kosten „DARK von der Hand ins Grab“, Effekt „DARK vom Deck ins Grab“</td></tr>
+  <tr><td><code>locks</code></td><td>Einschränkungen des Spielers, z. B. „du kannst aus dem Extra Deck nur Synchromonster beschwören“ (Art, Bereich, Erlaubtes/Verbotenes, ganzer Zug); genutzt von Stufe 2</td><td>Swordsoul of Mo Ye: nur Synchro aus dem Extra Deck</td></tr>
   <tr><td><code>count_limit</code></td><td><code>OPT</code> oder <code>HOPT:&lt;Schlüssel&gt;</code> (geteilte Limits über den Schlüssel)</td><td><code>HOPT:id</code></td></tr>
   <tr><td><code>unknown</code>, <code>confidence</code></td><td>alles, was nicht sicher gelesen werden konnte, und eine daraus abgeleitete Sicherheit</td><td><code>condition s.spcon</code>, 0.85</td></tr>
 </table></div>

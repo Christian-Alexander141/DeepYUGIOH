@@ -1,6 +1,6 @@
 # Stufe 2: Analyzer System, Database 2 und Qualitätsfilter
 
-Stand: 9. November 2026 · Status: Schritte 2.1 und 2.2 umgesetzt (siehe Abschnitt 13), der Rest ist Konzept
+Stand: 9. November 2026 · Status: Schritte 2.1 bis 2.3 umgesetzt (siehe Abschnitte 13 und 14), der Rest ist Konzept
 
 Stufe 2 bewertet die Combos, die Phase 1 in Database 1 gefunden hat: wie stark sie sind, in welcher Situation, und wie gut sie zu anderen Combos und Decks passen. Sie macht das für den Deckbauer sichtbar und filterbar. Grundsatz aus dem [Gesamtkonzept](konzept.md):
 
@@ -132,7 +132,7 @@ Combos werden über ihre `signature` angesprochen, nicht über die interne ID vo
 |---|---|
 | 2.1 ✓ | Grundgerüst: Database 2, Analyzer-Vertrag, inkrementeller und versionierter Lauf über Database 1, CLI `deepyugioh analyze` |
 | 2.2 ✓ | Rechnerische Achsen: Ergebnis (Endfeld mit Störungen aus den Effect Signatures), Einsatz, Konsistenz mit Familien |
-| 2.3 | Deckspezifität: Sperren in den Effect Signatures, Anforderungsprofil, Generizität pro Karte und Combo, Passung zu Deckprofilen |
+| 2.3 ✓ | Deckspezifität: Sperren in den Effect Signatures, Anforderungsprofil, Generizität pro Karte und Combo, Passung zu Deckprofilen |
 | 2.4 | Normierung, allgemeine Spielstärke und Situationswerte mit Standardgewichten (`[analysis.weights]`) |
 | 2.5 | Kompatibilitätskanten zwischen Combos |
 | 2.6 | Qualitätsfilter: Profile, gespeicherte Ergebnisse, Dominanzfilter, Export |
@@ -190,3 +190,47 @@ Der erste Lauf über die 41.518 Combos von Database 1 dauert etwa 26 Sekunden. D
 ### Befund aus Phase 1
 
 30 Combos haben keine Handkarte als Voraussetzung, obwohl ihr Startaufbau eine hat. Die Karte wird benutzt, verlässt die Hand aber nicht (z. B. vorgezeigt). Die Konsistenz nimmt dann vorsichtig die Starthand des Aufbaus und markiert das (`hand_from_setup`). Korrigieren lässt sich das in der Bedarfsermittlung von Phase 1 (`requirements` in `generator/search/combo.py`). Das ändert Combo-Signaturen und gehört deshalb zur Phase-1-Erweiterung (Schritt 2.9).
+
+## 14. Umsetzungsstand (Schritt 2.3: Deckspezifität)
+
+### Benutzung
+
+```bash
+uv run deepyugioh analyze                                         # berechnet auch die Achse genericness
+uv run deepyugioh analysis card --card "Sage with Eyes of Blue"   # Kartenprofil mit Anforderungen und Sperren
+uv run deepyugioh analysis fit --race Dragon --archetype Blue-Eyes --limit 10
+uv run deepyugioh analysis top --axis genericness
+```
+
+### Sperren in den Effect Signatures
+
+Die Extraktion (Version 2) liest Einschränkungen des Spielers als `Lock` (`contracts/effects.py`): Art (`SPECIAL_SUMMON`, `NORMAL_SUMMON`, `ACTIVATE`), Bereich (`all`, `extra` = nur Beschwörungen aus dem Extra Deck, `main`, ein Beschwörungstyp wie `PENDULUM`, `field` = solange die Karte auf dem Feld liegt), das Erlaubte oder Verbotene als `Condition` und ob die Sperre den ganzen Zug betrifft (Aktivitätszähler, „wenn du in diesem Zug noch nicht …“). Erkannt wird eine Sperre, wenn ein Effekt sie per `Duel.RegisterEffect(e, tp)` beim Spieler registriert, an einer Karte mit Wirkung auf die eigene Seite (`SetTargetRange(1, …)`, `SetAbsoluteRange(tp, 1, …)`, z. B. an einer Spielmarke) oder als Dauereffekt. Beschwörungsbedingungen einer Karte für sich selbst sind keine Sperren. Ergebnis: 1.207 Sperren auf 1.082 der teilnahmeberechtigten Karten, davon 131 nicht lesbar (als solche markiert).
+
+### Kartenprofil (`card_profiles` in Database 2)
+
+| Wert | Bedeutung |
+|---|---|
+| Anforderungsanteil | Anteil des Kartenpools, mit dem die Effekte der Karte arbeiten können. Pro Effekt der kleinste Anteil seiner Bewegungen (z. B. „Krieger Level ≤ 4 aus dem Deck“: 5,1 %); Effekte ohne Kartenbedarf (sich selbst beschwören, ziehen, den Gegner treffen) zählen mit 100 %. Für die Karte zählt das geometrische Mittel über alle wirksamen Effekte. |
+| Sperranteil | Anteil, den die Sperren der Karte noch erlauben. Sperren nur für das Extra Deck zählen zur Hälfte, weil Beschwörungen aus dem Main Deck frei bleiben. |
+| Generizität | log-skaliert aus Anforderungs- mal Sperranteil: 100 = alles, 75 = 10 %, 50 = 1 %, 25 = 0,1 %, 0 = höchstens 0,01 % |
+
+Beispiele: Monster Reborn, Pot of Greed, Ash Blossom 100 · Foolish Burial 94 · Swordsoul of Mo Ye 95 (Sperre: aus dem Extra Deck nur Synchro, 25 % davon erlaubt) · Reinforcement of the Army 68 · Elfnote Lucina 72 (ein Effekt sucht „Elfnote“) · Sage with Eyes of Blue 35 · Mitsurugi-Karten 17.
+
+Die Anteile werden über Bitmengen gezählt (ein Bit pro Karte, eine Maske pro Eigenschaft). Ein Filter ist damit eine Folge bitweiser UND-Operationen, ohne zusätzliche Abhängigkeiten.
+
+### Achse `genericness` (Version 3)
+
+- **Generizität der Combo**: geometrisches Mittel der Anforderungsanteile ihrer Karten, sodass eine sehr spezifische Karte die Combo herunterzieht. Dazu kommen die Sperren, die die Combo auslöst.
+- **Ausgelöste Sperren**: Eine Sperre gilt als *sicher*, wenn die Karte in der Linie benutzt wurde und alle ihre aktivierbaren Effekte sperren. Sonst gilt sie als *möglich* und zählt mit halbem Gewicht (Quadratwurzel des Anteils). Welcher Effekt einer Karte genau benutzt wurde, lässt sich aus der Linie nicht sicher ablesen.
+- **Anforderungsprofil** (`tags`): Archetypen, Typen und Attribute der Karten mit Anzahl, dazu die am wenigsten generischen Karten.
+- Verteilung über Database 1: Werte von 0 bis 100, Schwerpunkt 30–70, 2.434 Combos unter 10 (stark an einen Archetyp gebunden). 3.324 Combos lösen eine sichere Sperre aus.
+
+### Passung zu einem Deckprofil
+
+Ein Deckprofil besteht aus Archetypen, Typen und Attributen (`DeckProfile`). Die Passung (0–100) einer Combo ist der Mittelwert über ihre Karten:
+
+- Karte gehört zum Profil (Archetyp, Typ oder Attribut): 1,
+- sonst ihre Generizität / 100, dazu ein Faktor von 0,5 bei einem fremden Archetyp und 0,6 bei einem Monster anderen Typs oder Attributs,
+- mal einen Faktor für jede sichere Sperre: 1, wenn das Profil selbst erlaubt ist (z. B. „nur Drachen“ in einem Drachendeck), sonst der Anteil, den die Sperre erlaubt.
+
+So hat eine Dragonmaid-Combo eine Generizität von 38 und im Profil „Drache, Blue-Eyes“ eine Passung von 100. Eine generische Combo aus Zaubern passt überall mit 100. Die Faktoren 0,5 und 0,6 sind Startwerte und werden wie die Gewichte später am Simulator kalibriert. Die Passung wird bei Bedarf berechnet (`analysis fit`). Gespeicherte Filterprofile folgen in Schritt 2.6.

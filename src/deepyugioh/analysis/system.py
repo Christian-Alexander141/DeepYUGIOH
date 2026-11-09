@@ -77,6 +77,9 @@ class AnalyzerSystem:
         total += len(pending)
         for a in self.analyzers:
             self.repo.normalise(a.name)
+            store_extra = getattr(a, "store_extra", None)
+            if callable(store_extra):
+                store_extra(self.repo)
         self.repo.finish(report.analysis_id, total)
         if progress:
             progress(n, n)

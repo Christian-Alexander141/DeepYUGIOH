@@ -7,6 +7,7 @@ schema version only changes when an existing table changes):
     analyses      one run of the Analyzer System: analyzers + versions, settings, source, counts
     combo_axes    per combo (signature) and axis: raw facts, value, score 0-100, explanation, version
     combo_profiles  per combo: facts several analyzers share (family, card count, hand)
+    card_profiles   per card: traits, needs, restrictions, genericness (step 2.3)
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import Iterable
 from deepyugioh import paths
 from deepyugioh.contracts.analysis import AxisScore
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 1   # new tables are added with IF NOT EXISTS; the version changes only for changed tables
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -54,6 +55,12 @@ CREATE TABLE IF NOT EXISTS combo_profiles (
     data        TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS combo_profiles_family ON combo_profiles(family);
+CREATE TABLE IF NOT EXISTS card_profiles (
+    code        INTEGER PRIMARY KEY,
+    version     TEXT NOT NULL,
+    genericness REAL NOT NULL,
+    data        TEXT NOT NULL      -- JSON CardProfile
+);
 """
 
 
@@ -107,6 +114,20 @@ class AnalysisRepository:
                 " family=COALESCE(excluded.family, combo_profiles.family), data=excluded.data",
                 [(s, n, json.dumps(h), f, json.dumps(d, sort_keys=True)) for s, n, h, f, d in rows],
             )
+
+    def write_card_profiles(self, profiles: Iterable, version: str):
+        with self.db:
+            self.db.executemany("INSERT OR REPLACE INTO card_profiles VALUES (?,?,?,?)",
+                                [(p.code, version, p.genericness, json.dumps(p.to_dict(), ensure_ascii=False)) for p in profiles])
+
+    def card_profile(self, code: int) -> dict | None:
+        row = self.db.execute("SELECT data FROM card_profiles WHERE code=?", (code,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def axis_rows(self, axis: str):
+        """(signature, raw, score) of every combo on one axis."""
+        for sig, raw, score in self.db.execute("SELECT signature, raw, score FROM combo_axes WHERE axis=?", (axis,)):
+            yield sig, json.loads(raw), score
 
     def normalise(self, axis: str) -> int:
         """Score = percentile of value within (axis, version); ties share the mean rank. Returns rows scored."""

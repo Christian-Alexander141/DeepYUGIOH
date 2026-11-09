@@ -51,6 +51,8 @@ class OutcomeAnalyzer:
     def __init__(self, pool: CardPool, knowledge: EffectKnowledge | None):
         self.pool = pool
         self.knowledge = knowledge
+        if knowledge is not None:  # the disruptions come from the effect signatures
+            self.version = f"{type(self).version}/{knowledge.version()}"
 
     def prepare(self, combos: Iterable[ComboRecord]) -> None:
         pass
@@ -278,4 +280,9 @@ class ConsistencyAnalyzer:
 
 
 def default_analyzers(pool: CardPool, knowledge: EffectKnowledge | None, deck: DeckModel = DeckModel()) -> list:
-    return [OutcomeAnalyzer(pool, knowledge), CostAnalyzer(), ConsistencyAnalyzer(deck)]
+    out = [OutcomeAnalyzer(pool, knowledge), CostAnalyzer(), ConsistencyAnalyzer(deck)]
+    if knowledge is not None:
+        from deepyugioh.analysis.specificity import GenericnessAnalyzer
+
+        out.append(GenericnessAnalyzer(knowledge))
+    return out

@@ -12,10 +12,14 @@ Concept and roadmap: docs/stufe2-konzept.md. Database 1 is only read.
 from deepyugioh.analysis.axes import (
     ConsistencyAnalyzer, CostAnalyzer, DeckModel, OutcomeAnalyzer, default_analyzers, family_key,
 )
+from deepyugioh.analysis.specificity import (
+    CardProfiler, CardUniverse, DeckProfile, GenericnessAnalyzer, deck_fit, generic_scale,
+)
 from deepyugioh.analysis.store import AnalysisRepository, SchemaMismatch
 from deepyugioh.analysis.system import AnalysisReport, AnalyzerSystem, analyse_combos
 
 __all__ = [
-    "AnalysisReport", "AnalysisRepository", "AnalyzerSystem", "ConsistencyAnalyzer", "CostAnalyzer", "DeckModel",
-    "OutcomeAnalyzer", "SchemaMismatch", "analyse_combos", "default_analyzers", "family_key",
+    "AnalysisReport", "AnalysisRepository", "AnalyzerSystem", "CardProfiler", "CardUniverse", "ConsistencyAnalyzer",
+    "CostAnalyzer", "DeckModel", "DeckProfile", "GenericnessAnalyzer", "OutcomeAnalyzer", "SchemaMismatch",
+    "analyse_combos", "deck_fit", "default_analyzers", "family_key", "generic_scale",
 ]

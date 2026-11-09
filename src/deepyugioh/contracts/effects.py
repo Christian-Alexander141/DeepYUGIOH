@@ -197,6 +197,62 @@ class Trigger:
 
 
 @dataclass(frozen=True)
+class Lock:
+    """A restriction an effect puts on its player, e.g. "you cannot Special Summon, except Dragon monsters".
+
+    kind      SPECIAL_SUMMON | NORMAL_SUMMON | ACTIVATE
+    scope     all | extra (only summons from the Extra Deck) | main (only summons not from the Extra Deck)
+              | <summon type> (e.g. PENDULUM) | field (while the card is face-up on the field)
+    allowed   cards that are still allowed (None if not known that way)
+    forbidden cards that are forbidden (None if not known that way); both None and not unknown = everything
+    whole_turn  the restriction also covers the turn *before* the activation (activity counter)
+    """
+
+    kind: str
+    scope: str = "all"
+    allowed: Condition | None = None
+    forbidden: Condition | None = None
+    whole_turn: bool = False
+    unknown: bool = False
+    source: str = ""            # Lua text of the restriction, for explanations
+
+    @property
+    def forbids_all(self) -> bool:
+        return self.allowed is None and self.forbidden is None and not self.unknown
+
+    def allows(self, card: CardInfo, own_code: int | None = None) -> bool | None:
+        """True / False, or None if the restriction could not be read."""
+        if self.unknown:
+            return None
+        if self.allowed is not None:
+            return self.allowed.matches(card, own_code)
+        if self.forbidden is not None:
+            return not self.forbidden.matches(card, own_code)
+        return False
+
+    def to_dict(self) -> dict:
+        d = {"kind": self.kind, "scope": self.scope}
+        if self.allowed is not None:
+            d["allowed"] = self.allowed.to_dict()
+        if self.forbidden is not None:
+            d["forbidden"] = self.forbidden.to_dict()
+        if self.whole_turn:
+            d["whole_turn"] = True
+        if self.unknown:
+            d["unknown"] = True
+        if self.source:
+            d["source"] = self.source
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Lock":
+        return cls(d["kind"], d.get("scope", "all"),
+                   Condition.from_dict(d["allowed"]) if "allowed" in d else None,
+                   Condition.from_dict(d["forbidden"]) if "forbidden" in d else None,
+                   d.get("whole_turn", False), d.get("unknown", False), d.get("source", ""))
+
+
+@dataclass(frozen=True)
 class EffectSignature:
     effect_id: str                      # "<code>:<idx>"
     card: int
@@ -214,6 +270,7 @@ class EffectSignature:
     unknown: tuple[str, ...] = ()       # parts that were not interpreted
     source: str = "lua-static"
     confidence: float = 1.0
+    locks: tuple[Lock, ...] = ()        # restrictions this effect puts on its player
 
     @property
     def usable(self) -> bool:
@@ -231,6 +288,7 @@ class EffectSignature:
             "draws": self.draws, "lp_cost": self.lp_cost, "count_limit": self.count_limit,
             "categories": list(self.categories), "restrictions": list(self.restrictions),
             "unknown": list(self.unknown), "source": self.source, "confidence": self.confidence,
+            **({"locks": [x.to_dict() for x in self.locks]} if self.locks else {}),
         }
 
     @classmethod
@@ -241,7 +299,7 @@ class EffectSignature:
             tuple(Move.from_dict(m) for m in d.get("costs", ())), tuple(Move.from_dict(m) for m in d.get("moves", ())),
             d.get("draws", 0), d.get("lp_cost", 0), d.get("count_limit"), tuple(d.get("categories", ())),
             tuple(d.get("restrictions", ())), tuple(d.get("unknown", ())), d.get("source", "lua-static"),
-            d.get("confidence", 1.0),
+            d.get("confidence", 1.0), tuple(Lock.from_dict(x) for x in d.get("locks", ())),
         )
 
 
@@ -288,6 +346,6 @@ def summarize(signatures: Iterable[EffectSignature]) -> dict:
 
 
 __all__ = [
-    "KINDS", "UNKNOWN", "ZONES", "CardFilter", "Condition", "EffectKnowledge", "EffectSignature", "Move", "Trigger",
+    "KINDS", "UNKNOWN", "ZONES", "CardFilter", "Condition", "EffectKnowledge", "EffectSignature", "Lock", "Move", "Trigger",
     "summarize",
 ]
