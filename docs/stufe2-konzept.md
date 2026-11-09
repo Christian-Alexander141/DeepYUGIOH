@@ -1,0 +1,149 @@
+# Stufe 2: Analyzer System, Database 2 und Qualitätsfilter
+
+Stand: 9. November 2026 · Status: Konzept, abgestimmt mit den Entscheidungen vom 9. November 2026
+
+Stufe 2 bewertet die Combos, die Phase 1 in Database 1 gefunden hat: wie stark sie sind, in welcher Situation, und wie gut sie zu anderen Combos und Decks passen. Sie macht das für den Deckbauer sichtbar und filterbar. Grundsatz aus dem [Gesamtkonzept](konzept.md):
+
+> Die Combo-Datenbank speichert, was möglich ist. Die Analyzer-Datenbank speichert, wie gut es ist. Der Deckbauer entscheidet, was davon zusammengehört.
+
+Database 1 wird von Stufe 2 nur gelesen (`ComboReader`) und nie verändert.
+
+## 1. Ziele
+
+1. **Allgemeine Spielstärke** jeder Combo als ein Wert, der Combos vergleichbar macht.
+2. **Situationswerte**: Spielbeginn (als Erster), Durchbrechen (als Zweiter gegen ein Feld) und späteres Spiel (mit Ressourcen im Friedhof, wenigen Handkarten). Weitere Situationen müssen ergänzt werden können.
+3. **Deckspezifität**: wie sehr eine Combo auf ein bestimmtes Deck angewiesen ist (Archetyp, Typ, Attribut, Sperren). Je generischer, desto allgemeiner einsetzbar. Deckspezifisch ist nicht schlecht, es muss aber erkennbar sein, *wofür* eine Combo taugt.
+4. **Kompatibilität**: welche Combos sich ein Deck teilen können und welche sich ausschließen.
+5. **Gefilterte Combo-Mengen** für den Deckbauer.
+6. **Genauigkeit vor Geschwindigkeit**: Ziel ist eine übermenschliche Spielstärke. Wo die Engine eine Frage beantworten kann, entscheidet die Engine und keine Näherung. Robustheit wird per Engine geprüft.
+
+## 2. Entscheidungen
+
+| Frage | Entscheidung |
+|---|---|
+| Späteres Spiel | Phase 1 wird um Startaufbauten für spätere Spielsituationen erweitert (Friedhof, verbannte Karten, Feld, kleinere Hand). |
+| Robustheit | Direkt per Engine: Der Gegner bekommt Handtraps und unterbricht, wir suchen die beste Antwort. Keine Näherung als Endergebnis. |
+| Datenbanken | **Eine** Database 2 (`data/analysis.sqlite`) mit allen Bewertungen *und* den gespeicherten Ergebnissen der Filterprofile. Ein Filterprofil lässt sich bei Bedarf als eigene Datei exportieren. So wird nichts doppelt gespeichert und kein gefilterter Stand veraltet unbemerkt. |
+| Gewichte | Feste Standardgewichte in der Konfiguration. Sie werden später am Simulator kalibriert und sind in der GUI änderbar, auch zu Testzwecken. |
+
+## 3. Bewertungsprofil statt einer einzigen Zahl
+
+Jede Combo bekommt ein **Bewertungsprofil** aus mehreren **Achsen**. Pro Achse werden gespeichert:
+
+- **Rohwerte**: messbare Fakten, z. B. „2 Störungen auf dem Endfeld“ oder „3 Handkarten nötig“.
+- **Wert 0–100**: normiert als Perzentil über alle bewerteten Combos derselben Kartenmenge. 80 heißt „besser als 80 % der Combos“.
+- **Begründung**: kurzer Text, warum der Wert so ist, für den Deckbauer und zum Prüfen.
+- **Version** des Analyzers, damit alte und neue Bewertungen nie vermischt werden.
+
+Neue Anforderungen kommen als neue Achse hinzu, ohne bestehende zu ändern.
+
+| Achse | Misst | Grundlage |
+|---|---|---|
+| **Ergebnis** | Endfeld: Monster (ATK, Stufen), Störungen für den gegnerischen Zug (Effekte, die im Zug des Gegners nutzbar sind, Negates, Zerstörung, Verbannung), Schutz, Kartenvorteil, Verluste des Gegners, LP-Schaden, Sieg | Endfeld in Database 1 und die Effect Signatures der Endfeldkarten |
+| **Einsatz** | benötigte Karten, davon Handkarten, LP-Kosten, Normalbeschwörung verbraucht, Once-per-Turn-Effekte verbraucht, Länge der Linie | Database 1 |
+| **Konsistenz** | Wahrscheinlichkeit, die nötigen Handkarten zu ziehen (Deck mit 40 Karten, 3 Kopien, 5 Karten als Erster, 6 als Zweiter). Mehrere Starter für dasselbe Ergebnis (*Combo-Familie*) erhöhen die Chance. | Hypergeometrische Verteilung über die Familien |
+| **Robustheit** | Was von der Combo übrig bleibt, wenn der Gegner mit Handtraps unterbricht: das garantierte Endfeld je Handtrap und über alle Handtraps | **Engine**, siehe Abschnitt 6 |
+| **Deckspezifität** | Anforderungsprofil, Sperren, Generizität (Abschnitt 4) | Kartendaten, Skripte (Effect Signatures) |
+| **Situationen** | Spielbeginn, Durchbrechen, späteres Spiel (Abschnitt 5) | Kombination der Achsen und eigene Startaufbauten |
+
+**Allgemeine Spielstärke** = gewichtete Kombination aus Ergebnis, Einsatz, Konsistenz und Robustheit. Die Standardgewichte stehen in `[analysis.weights]`, sind in der GUI änderbar und werden später am Simulator kalibriert (Phase 4). Gespeichert werden immer die Achsenwerte. Der Gesamtwert wird aus ihnen und den Gewichten berechnet, mit denen er erzeugt wurde. Andere Gewichte verlangen also keine neue Analyse.
+
+## 4. Deckspezifität
+
+Drei Teile, die gemeinsam zeigen, was eine Combo dem Deck abverlangt:
+
+1. **Anforderungsprofil**: Merkmale, die das Deck mitbringen muss, abgeleitet aus den benötigten Karten und den Filtern ihrer Effekte, etwa „Typ Drache“, „Archetyp Blue-Eyes“, „Attribut LIGHT“, „Level 4“. Unterschieden wird zwischen *Karten der Combo* (müssen im Deck sein) und *Bedingungen ihrer Effekte* (das Deck braucht passende weitere Karten).
+2. **Sperren**: Viele Effekte schränken den Rest des Zuges ein, z. B. „du kannst nur noch Drachen spezialbeschwören“ oder „nur einmal pro Zug“. Sperren sind der Hauptgrund, warum zwei Combos nicht zusammenpassen. Sie werden aus den Skripten ausgelesen, als Erweiterung der Effect Signatures um Effekte wie `EFFECT_CANNOT_SPECIAL_SUMMON` mit Zielfilter.
+3. **Generizität 0–100**:
+   - *Pro Karte*: wie stark sie an einen Deckkontext gebunden ist. Allgemeine Karten ohne Archetyp- und Typbezug sind hoch, Archetypkarten mit Sperre niedrig.
+   - *Pro Combo*: aus ihren Karten, ihren Sperren und dem Anteil anderer Combos in Database 1, mit denen sie ohne Konflikt in ein Deck passt.
+
+Für den Deckbauer gibt es zusätzlich die **Passung zu einem Deckprofil**. Ein Deckprofil ist eine Menge von Merkmalen, z. B. „Drachen, LIGHT, Blue-Eyes“. Eine Drachen-Combo hat eine niedrige Generizität, aber im Profil „Drachendeck“ eine hohe Passung. So wird sichtbar, wofür eine Combo taugt, ohne sie abzuwerten.
+
+**Kompatibilität zwischen Combos** wird als Kanten gespeichert:
+
+- gemeinsame Karten (spart Plätze im Deck, oft Synergie),
+- gemeinsamer Archetyp oder gemeinsame Merkmale,
+- Sperrkonflikte (Combo A sperrt, was Combo B braucht).
+
+Gespeichert werden nur Kanten mit einer dieser Beziehungen, nicht alle Paare. Das wird die wichtigste Eingabe für den Deckbauer.
+
+## 5. Situationen
+
+| Situation | Bedeutung | Bewertet über |
+|---|---|---|
+| **Spielbeginn** | als Erster, leeres gegnerisches Feld, volle Hand | Ergebnis (vor allem Störungen), Konsistenz mit 5 Handkarten, Robustheit |
+| **Durchbrechen** | als Zweiter gegen ein aufgebautes Feld | Verluste des Gegners und Schaden gegen die Gegnerfelder (Phase 1 sucht schon gegen `standard`; dazu kommen stärkere Gegnerfelder mit Störungen), Konsistenz mit 6 Handkarten |
+| **Späteres Spiel** | Ressourcen im Friedhof oder verbannt, wenige Handkarten, Karten auf dem Feld | neue Startaufbauten in Phase 1 (Abschnitt 7), Kartenvorteil, Unabhängigkeit von der Hand |
+
+Situationen sind Einträge in der Konfiguration, die aus Achsen und Gewichten bestehen. Weitere lassen sich ohne Codeänderung ergänzen, solange ihre Achsen existieren.
+
+## 6. Robustheit per Engine
+
+Heute beantwortet die Suche jede Entscheidung des Gegners mit „passen“ (`ComboSearch._opponent`). Für die Robustheit wird daraus eine **adversariale Suche**:
+
+1. Der Gegner bekommt eine Handtrap aus einem Katalog auf die Hand. Der Katalog enthält zunächst die gängigen generischen: Ash Blossom & Joyous Spring, Effect Veiler, Infinite Impermanence, Nibiru, the Primal Being, Droll & Lock Bird, Ghost Belle & Haunted Mansion, Ghost Ogre & Snow Rabbit, D.D. Crow, PSY-Framegear Gamma, Maxx "C".
+2. An jeder Stelle, an der der Gegner die Handtrap einsetzen *kann*, verzweigt die Suche: einsetzen oder nicht.
+3. Nach jeder Unterbrechung sucht die Engine wie bisher die **beste Fortsetzung** mit unseren Karten aus dem Startaufbau der Combo.
+4. Ergebnis je Handtrap: das **garantierte Endfeld**, also das Minimum über die Wahlen des Gegners vom Maximum über unsere Antworten. Dazu kommt der kritische Schritt, an dem die Unterbrechung am meisten kostet.
+5. Die Achse Robustheit vergleicht das garantierte Endfeld mit dem ungestörten Ergebnis. Für die allgemeine Spielstärke werden die Handtraps nach ihrer Verbreitung gewichtet (Standardgewichte, später kalibriert).
+
+Das ist rechenintensiv: eine Suche pro Combo und Handtrap. Der Robustness Analyzer läuft deshalb wie der Generator **fortsetzbar und parallel**, mit eigenem Fortschritt. Er bearbeitet die Combos nach ihrem vorläufigen Stärkewert (ohne Robustheit) in absteigender Reihenfolge, die stärksten zuerst. Es wird keine Combo ausgelassen, nur später geprüft. Unvollständige Robustheitssuchen werden wie in Phase 1 als unvollständig markiert, nie als bestanden.
+
+## 7. Erweiterung von Phase 1: spätere Spielsituationen
+
+- `StartSetup` bekommt zusätzliche Zonen für Spieler 0: Friedhof, verbannt, Feld. Leere Zonen werden nicht serialisiert. Die IDs aller bisherigen Startaufbauten bleiben dadurch gleich, ebenso Fortschritt und Database 1.
+- Die Engine-Anbindung legt Karten direkt in diese Zonen.
+- Eine neue Kandidatenquelle erzeugt Spielmitte-Aufbauten: kleinere Hand (2–3 Karten), Ressourcen im Friedhof, z. B. aus den Friedhofseffekten der Effect Signatures. Optional kommen eigene Karten auf das Feld.
+- Combos daraus kommen wie alle anderen in Database 1. Ihr Startaufbau zeigt, dass sie eine spätere Situation voraussetzen. Die Situation „späteres Spiel“ bewertet sie.
+- Die Combo-Definition wird um Karten erweitert, die zu Beginn schon im Friedhof oder auf dem Feld liegen. Sie zählen als benötigte Karten mit eigener Herkunft.
+
+## 8. Database 2 (`data/analysis.sqlite`)
+
+| Tabelle | Inhalt |
+|---|---|
+| `analyses` | ein Lauf eines Analyzers: Name, Version, Einstellungen, Zeit, Quelle (Pfad und Schema von Database 1) |
+| `combo_axes` | pro Combo (`signature`) und Achse: Rohwerte (JSON), Wert 0–100, Begründung, Analyzer-Version, Lauf |
+| `card_profiles` | pro Karte: Merkmale, Sperren, Generizität |
+| `combo_profiles` | pro Combo: Anforderungsprofil, Sperren, Familie |
+| `compatibility` | Kanten zwischen Combos: Art (gemeinsame Karten, Archetyp, Sperrkonflikt), Stärke |
+| `robustness_jobs` | Fortschritt des Robustness Analyzers: Combo, Handtrap, Status, garantiertes Endfeld |
+| `filter_profiles` | gespeicherte Filterprofile (Kriterien, Gewichte, Deckprofil) |
+| `filter_results` | Mitgliedschaft und Rang einer Combo in einem Profil, mit der Version der Bewertung |
+| `meta` | Schema-Version |
+
+Combos werden über ihre `signature` angesprochen, nicht über die interne ID von Database 1. So bleibt die Zuordnung auch bei einer neu aufgebauten Database 1 stabil. Neue Combos in Database 1 werden inkrementell bewertet.
+
+## 9. Qualitätsfilter
+
+- Ein **Filterprofil** besteht aus Mindestwerten pro Achse oder Situation, einem Deckprofil für die Passung, erlaubten und verbotenen Sperren, Kartenzahl und Gewichten. Beispiele: „allgemein stark“, „Drachendeck“, „als Zweiter“.
+- **Unterlegene Combos** lassen sich ausblenden: gleiche oder mehr benötigte Karten bei einem in jeder Achse schlechteren Ergebnis (Pareto-Dominanz innerhalb einer Familie). Phase 1 speichert bewusst alles. Erst hier wird entschieden, was der Deckbauer sieht.
+- Das Ergebnis wird in `filter_results` gespeichert und ist per Abfrage, Export (eigene Datei pro Profil) und in der GUI verfügbar.
+
+## 10. Schnittstellen
+
+- Eingang: `ComboReader` (Database 1), `CardPool`, `EffectKnowledge` (Effect Signatures), die Engine für die Robustheit.
+- Analyzer-Vertrag: `Analyzer.analyze(combo, context) -> AxisResult(raw, explanation)`, plus `name` und `version`. Die Normierung (Perzentile) übernimmt das Analyzer System für alle Achsen gleich.
+- Ausgang: `AnalysisReader`, für den Deckbauer und die GUI: Bewertungsprofil einer Combo, Abfragen nach Achsen, Filterprofile, Kompatibilitätskanten.
+
+## 11. Umsetzung in Teilschritten
+
+| Schritt | Inhalt |
+|---|---|
+| 2.1 | Grundgerüst: Database 2, Analyzer-Vertrag, inkrementeller und versionierter Lauf über Database 1, CLI `deepyugioh analyze` |
+| 2.2 | Rechnerische Achsen: Ergebnis (Endfeld mit Störungen aus den Effect Signatures), Einsatz, Konsistenz mit Familien |
+| 2.3 | Deckspezifität: Sperren in den Effect Signatures, Anforderungsprofil, Generizität pro Karte und Combo, Passung zu Deckprofilen |
+| 2.4 | Normierung, allgemeine Spielstärke und Situationswerte mit Standardgewichten (`[analysis.weights]`) |
+| 2.5 | Kompatibilitätskanten zwischen Combos |
+| 2.6 | Qualitätsfilter: Profile, gespeicherte Ergebnisse, Dominanzfilter, Export |
+| 2.7 | Test-GUI für Stufe 2 nach dem Vorbild der GUI von Phase 1: Bewertungsprofile, Gewichte änderbar, Filterprofile, Deckprofil-Passung |
+| 2.8 | Robustheit per Engine: Gegner mit Handtraps in der Suche, Handtrap-Katalog, fortsetzbarer paralleler Lauf |
+| 2.9 | Phase-1-Erweiterung: Startaufbauten für spätere Spielsituationen, Situation „späteres Spiel“ |
+
+Jeder Schritt bekommt Tests und Dokumentation. Database 1 und das Verhalten von Phase 1 bleiben unverändert, außer durch die ausdrücklich geplante Erweiterung in 2.9.
+
+## 12. Offene Punkte
+
+- **Kalibrierung**: Die Standardgewichte sind begründete Startwerte, kein Beweis für Spielstärke. Belastbar werden sie erst durch Simulationen ganzer Spiele (Phase 4). Bis dahin zeigt jede Bewertung ihre Rohwerte und Begründung, damit sie nachvollziehbar bleibt.
+- **Handtrap-Katalog und Verbreitung**: Der Startkatalog ist generisch. Archetypspezifische Unterbrechungen und eine an Daten gemessene Verbreitung folgen später.
+- **Gegnerfelder für „Durchbrechen“**: Die heutigen Gegnerfelder handeln nie. Für echtes Durchbrechen braucht es Gegnerfelder mit Störungen. Das hängt mit der adversarialen Suche aus Schritt 2.8 zusammen.
