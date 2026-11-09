@@ -60,6 +60,13 @@ CANDIDATE_NUMBERS = [
     ("max_extra", "Max. Extra Deck", "Größe des Extra Decks im Startaufbau", 0, 200),
 ]
 
+AIDE_NUMBERS = [
+    ("aide_share", "Anteil AIDE in Stufe 7", "0,05 bis 0,95", 0.05, 0.95),
+    ("aide_branching", "Verzweigung pro Effekt", "Karten je Bewegung", 1, 50),
+    ("aide_plans_per_card", "Pläne pro Karte", "je Start- bzw. Zielkarte", 1, 100),
+    ("aide_neighbors", "Zusätzliche Deck-Nachbarn", "im Startaufbau eines Plans", 0, 200),
+]
+
 PAGES = (
     ("settings", "Einstellungen", "Alle Parameter des Combo Generators, dauerhaft in deepyugioh.toml"),
     ("search", "Einzelsuche", "Einen Startaufbau mit den aktuellen Einstellungen durchsuchen"),
@@ -602,6 +609,20 @@ class SettingsTab:
         self._flag(body, row, "enablers", "Hilfskarten ergänzen", "Z. B. Foolish Burial, wenn eine Karte im Friedhof wirkt")
         body.columnconfigure(1, weight=1)
 
+        aide = card(right_col, "AIDE", "algorithmische Suche, Stufen 5 bis 7")
+        aide.pack(fill="x", pady=(16, 0))
+        halves = [ttk.Frame(aide.body), ttk.Frame(aide.body)]
+        for i, half in enumerate(halves):
+            half.grid(row=0, column=i, sticky="nsew", padx=(0, 12) if i == 0 else 0)
+            aide.body.columnconfigure(i, weight=1, uniform="aide")
+        rows = [0, 0]
+        for i, (key, label, hint, lo, hi) in enumerate(AIDE_NUMBERS):
+            rows[i % 2] = self._number(halves[i % 2], rows[i % 2], key, label, hint, lo, hi,
+                                       float if key == "aide_share" else int)
+        flag = ttk.Frame(aide.body)
+        flag.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self._flag(flag, 0, "aide_helpers", "Hilfskarten ergänzen", "wie in den Stufen 1 bis 4 (laut Benchmark langsamer)")
+
         self.fill(app.saved)
 
     # ---- widgets -------------------------------------------------------------
@@ -610,7 +631,8 @@ class SettingsTab:
         v.trace_add("write", self._changed)
         cell = ttk.Frame(parent)
         cell.grid(row=row, column=0, columnspan=2, sticky="ew", pady=4)
-        ttk.Spinbox(cell, textvariable=v, from_=lo, to=hi, increment=1 if kind is int else 5.0, width=11).pack(side="left")
+        step = 1 if kind is int else (0.05 if hi <= 1 else 5.0)
+        ttk.Spinbox(cell, textvariable=v, from_=lo, to=hi, increment=step, width=11).pack(side="left")
         text = ttk.Frame(cell)
         text.pack(side="left", padx=12, fill="x")
         ttk.Label(text, text=label).pack(anchor="w")
@@ -642,8 +664,10 @@ class SettingsTab:
         try:
             for f in fields(SearchLimits):
                 self.vars[f.name].set(getattr(cfg.limits, f.name))
-            for key in ("max_deck_neighbors", "max_extra", "enablers"):
+            for key in ("max_deck_neighbors", "max_extra", "enablers", "aide_plans_per_card", "aide_branching",
+                        "aide_neighbors", "aide_helpers"):
                 self.vars[key].set(getattr(cfg.candidates, key))
+            self.vars["aide_share"].set(f"{cfg.candidates.aide_share:g}")
             self.vars["workers"].set(cfg.workers)
             self.vars["validate"].set(cfg.validate)
             for tier, v in self.tier_vars.items():
@@ -679,6 +703,11 @@ class SettingsTab:
             max_deck_neighbors=num["max_deck_neighbors"],
             max_extra=num["max_extra"],
             enablers=bool(self.vars["enablers"].get()),
+            aide_share=num["aide_share"],
+            aide_plans_per_card=num["aide_plans_per_card"],
+            aide_branching=num["aide_branching"],
+            aide_neighbors=num["aide_neighbors"],
+            aide_helpers=bool(self.vars["aide_helpers"].get()),
         )
         cfg = GeneratorConfig(limits, candidates, dict(self.boards), num["workers"], bool(self.vars["validate"].get()))
         try:

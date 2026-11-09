@@ -94,9 +94,16 @@ class ComboGenerator:
         source: CandidateSource | None = None,
         state: JobStore | None = None,
         pool_factory: Callable[[], CardPool] | None = None,
+        knowledge=None,
+        hypotheses=None,
+        aide_codes=None,
     ):
         """`pool_factory` builds a CardPool inside each worker process (config.workers > 1);
-        it must be picklable, e.g. the CardStore class itself."""
+        it must be picklable, e.g. the CardStore class itself.
+
+        `knowledge` (EffectKnowledge) and `hypotheses` (aide.HypothesisStore) are only used by
+        the AIDE tiers 5-7; by default they are the card database and data/aide.sqlite.
+        `aide_codes` restricts the cards AIDE plans with (benchmarks on a card subset)."""
         self.pool = pool
         self.pool_factory = pool_factory
         self.sink = sink
@@ -104,6 +111,9 @@ class ComboGenerator:
         self.graph = graph
         self._source = source
         self._state = state
+        self._knowledge = knowledge
+        self._hypotheses = hypotheses
+        self._aide_codes = aide_codes
         self.versions = Versions(
             engine_commit=_git_head(paths.THIRD_PARTY / "ygopro-core"),
             scripts_commit=_git_head(paths.CARD_SCRIPTS),
@@ -129,10 +139,34 @@ class ComboGenerator:
         if self._source is None:
             if self.graph is None:
                 raise ValueError("a global run needs an InteractionGraph or a CandidateSource")
-            self._source = GraphCandidateSource(
+            from deepyugioh.generator.aide.source import HybridCandidateSource
+
+            graph_source = GraphCandidateSource(
                 self.graph, self.pool, self.config.candidates, self.config.boards(self.pool)
             )
+            self._source = HybridCandidateSource(graph_source, self._aide_source, self.config.candidates.aide_share)
         return self._source
+
+    def _aide_source(self):
+        """Built on first use of tier 5, 6 or 7 only."""
+        from deepyugioh.generator.aide.hypotheses import HypothesisStore
+        from deepyugioh.generator.aide.source import AideCandidateSource
+
+        if self._knowledge is None:
+            from deepyugioh.cards.signatures import SignatureStore  # default: the card database
+
+            self._knowledge = SignatureStore()
+        if self._hypotheses is None:
+            self._hypotheses = HypothesisStore()
+        return AideCandidateSource(
+            self._knowledge, self.graph, self.pool, self.config.candidates, self.config.boards(self.pool),
+            max_cards=self.config.limits.max_cards, hypotheses=self._hypotheses, codes=self._aide_codes,
+        )
+
+    def _tier_version(self, tier: int) -> str:
+        """Cursor key of a tier: per tier if the source distinguishes them (hybrid), else the source version."""
+        tier_version = getattr(self.source, "tier_version", None)
+        return tier_version(tier) if callable(tier_version) else self.source.version()
 
     @property
     def state(self) -> JobStore:
@@ -147,7 +181,7 @@ class ComboGenerator:
         for tier in sorted(set(self.config.candidates.tiers) | set(done)):
             row = dict(done.get(tier, {"complete": 0, "incomplete": 0, "error": 0, "combos_found": 0, "combos_new": 0}))
             row["total"] = self.source.tier_size(tier)
-            row["cursor"] = self.state.cursor(tier, self.source.version())
+            row["cursor"] = self.state.cursor(tier, self._tier_version(tier))
             out[tier] = row
         return out
 
@@ -206,7 +240,7 @@ class ComboGenerator:
         return report
 
     def _run_tier(self, tier, report, goal: "_Goal", progress, executor, workers):
-        source_version = self.source.version()
+        source_version = self._tier_version(tier)
         start = self.state.cursor(tier, source_version)
         pending: dict = {}                   # future -> (position, candidate)
         finished: set[int] = set()           # positions done beyond the cursor

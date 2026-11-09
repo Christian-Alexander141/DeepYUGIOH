@@ -1,6 +1,6 @@
 # Schnittstellen des Combo Generators
 
-Stand: 8. November 2026 · Datenformat-Version `SCHEMA_VERSION = 2`
+Stand: 9. November 2026 · Datenformat-Version `SCHEMA_VERSION = 2`
 
 Der Combo Generator ist ein eigenständiges Modul ([src/deepyugioh/generator/](../src/deepyugioh/generator/)). Er hängt nur von den **Verträgen** in [src/deepyugioh/contracts/](../src/deepyugioh/contracts/) ab und nie von den Interna anderer Module. Andere Module wie Analyzer oder Deckbauer nutzen ihn genauso nur über diese Verträge.
 
@@ -43,6 +43,19 @@ Schritt 3, die Interaction Discovery. Wird nur für globale Läufe gebraucht. Im
 | `neighbors(code)` | Spezifische Interaktionen einer Karte |
 | `related_extra(code)` | Verwandte Extra-Deck-Monster, die spezifischsten zuerst |
 | `needs(code)` / `enablers` | Generische Helferrollen und ihr Vertreter (z. B. Foolish Burial) |
+
+### `EffectKnowledge` ([contracts/effects.py](../src/deepyugioh/contracts/effects.py))
+
+Strukturierte Effektbeschreibungen für AIDE (Stufen 5–7). Implementiert von `cards.signatures.SignatureStore`; die Signaturen liegen in `cards.sqlite` (`effect_signatures`) und werden von `import-cards`, `aide build` oder beim ersten Einsatz gebaut.
+
+| Methode | Zweck |
+|---|---|
+| `version()` | Ändert sich mit jeder neuen Extraktion; die Planreihenfolge ist nur innerhalb einer Version stabil |
+| `codes()` / `card(code)` | Teilnahmeberechtigte Karten (wie im Interaktionsgraphen) und ihre Daten |
+| `signatures(code) -> list[EffectSignature]` | Pro Effekt: `kind`, `location`, `trigger`, `conditions`, `costs`, `moves`, `count_limit`, `unknown`, `confidence` |
+| `names(code)` / `archetypes(code)` | Karten bzw. Archetypen, die das Skript nennt |
+
+`Move(what, src, dst, role)` beschreibt eine Bewegung: Karten, die `what` erfüllen (`Condition` = ODER aus `CardFilter`-Alternativen; `None` = diese Karte), gehen von einer Zone in `src` nach `dst`, als Kosten oder Effekt. Nicht Verstandenes steht in `unknown` und schließt beim Abgleich nie eine Karte aus.
 
 Ein anderer Kandidatengenerator kann `InteractionGraph` umgehen, indem er direkt eine `CandidateSource` übergibt (siehe 3).
 
@@ -130,10 +143,15 @@ Der austauschbare Startaufbau-Generator. Er muss jede Stufe in fester Reihenfolg
 | `version()` | Ändert sich, wenn sich die Reihenfolge ändert |
 | `candidates(tier) -> Iterator[Candidate]` | `Candidate(setup, tier, origin, truncated)` |
 | `tier_size(tier) -> int \| None` | Für die Abdeckungsanzeige |
+| `tier_version(tier)` (optional) | Cursor-Schlüssel pro Stufe; fehlt die Methode, gilt `version()` für alle Stufen |
+
+Der Generator nutzt `HybridCandidateSource` ([generator/aide/source.py](../src/deepyugioh/generator/aide/source.py)): Die Stufen 1–4 kommen unverändert aus `GraphCandidateSource` (gleiche Version, gleiche Cursor), 5 und 6 aus `AideCandidateSource`, Stufe 7 mischt beide nach `aide_share`. AIDE wird erst beim ersten Einsatz einer dieser Stufen gebaut. `ComboGenerator(..., knowledge=, hypotheses=, aide_codes=)` erlaubt eigene Effektdaten, einen eigenen Kandidaten-Pool (`HypothesisStore`, Standard `data/aide.sqlite`) und eine Kartenmenge für Benchmarks.
 
 ### `ProgressListener`
 
 `on_job(JobReport)` wird nach jedem Suchlauf aufgerufen. `JobReport` enthält Kandidat, Stufe, Position, Status, gefundene und neue Combos, Laufzeit und Fehler.
+
+Für Auswertungen: `JobStore.jobs_for(candidate_ids)` liefert Status und Lauf-ID erledigter Kandidaten, `ComboRepository.cards_for_runs(run_ids)` die benötigten Karten der Combos eines Laufs. Daraus leitet `HypothesisStore.update_status()` den Status der AIDE-Pläne ab (VALIDATED, INVALID, INCONCLUSIVE, UNSUPPORTED).
 
 ## 4. Regeln für Änderungen
 

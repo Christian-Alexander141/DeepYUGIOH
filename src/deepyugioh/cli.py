@@ -5,6 +5,8 @@
     deepyugioh generate --tiers 1 2         global, resumable search into Database 1
     deepyugioh search --hand ... [--deck ...] [--extra ...] [--opponent standard]
     deepyugioh combos [--card NAME] [--positive opp_field_loss] [--lines]
+    deepyugioh aide build|stats|explain|plan|report   AIDE: effect signatures, plans, hypothesis status
+    deepyugioh benchmark [--budget 300s]    tiers 1-4 against AIDE and the hybrid tier on a card subset
     deepyugioh testmode [on|off]            show or switch test mode
     deepyugioh gui                          test GUI for tuning the generator (test mode only)
 
@@ -60,6 +62,11 @@ def cmd_import(args) -> int:
     g = CardGraph().build()
     print(f"interaction graph {g['version']}: {g['starters']} starters, interactions {g['interactions']}")
     print(f"enablers: {g['enablers']}")
+    from deepyugioh.cards.signatures import SignatureStore
+
+    sig = SignatureStore(build_if_missing=False).build()
+    print(f"effect signatures {sig['version']}: {sig['usable']} usable effects, "
+          f"{sig['unknown_share']:.0%} with unknown parts ({sig['unknown_share_without_conditions']:.0%} without conditions)")
     return 0
 
 
@@ -173,6 +180,110 @@ def cmd_combos(args) -> int:
     return 0
 
 
+def _card_line(store, sig) -> list[str]:
+    def what(m):
+        if m.is_self:
+            return "this card"
+        if not m.what.any_of:
+            return "any card"
+        return " OR ".join(", ".join(f"{k}={v}" for k, v in f.to_dict().items() if k != "unknown") or "any"
+                           for f in m.what.any_of)
+
+    out = [f"  [{sig.kind}] in {'/'.join(sig.location) or '?'}"
+           + (f", trigger {sig.trigger.event}{' (this card)' if sig.trigger.self_only else ''}" if sig.trigger else "")
+           + (f", {sig.count_limit}" if sig.count_limit else "") + f"  confidence {sig.confidence:.2f}"]
+    for c in sig.conditions:
+        out.append(f"      condition {c}")
+    for m in sig.costs:
+        out.append(f"      cost   {what(m)}: {'/'.join(m.src) or '?'} -> {m.dst}")
+    for m in sig.moves:
+        out.append(f"      effect {what(m)}: {'/'.join(m.src) or '?'} -> {m.dst}" + (" (opponent)" if m.opponent else ""))
+    if sig.draws:
+        out.append(f"      draws {sig.draws}")
+    if sig.unknown:
+        out.append(f"      UNKNOWN: {'; '.join(sig.unknown)}")
+    return out
+
+
+def cmd_aide(args) -> int:
+    from deepyugioh.cards.signatures import SignatureStore
+    from deepyugioh.cards.store import CardStore
+
+    store = CardStore()
+    if args.action == "build":
+        stats = SignatureStore(build_if_missing=False).build()
+        print(f"effect signatures {stats['version']}: {stats}")
+        return 0
+    knowledge = SignatureStore()
+    if args.action == "stats":
+        from deepyugioh.generator.aide.index import EffectIndex
+
+        print(f"effect signatures {knowledge.version()}: {knowledge.meta()}")
+        print(f"producer/consumer index: {EffectIndex(knowledge).stats()}")
+        return 0
+    if args.action == "explain":
+        if not args.card:
+            raise ValueError("aide explain needs --card NAME")
+        card = store.resolve(args.card)
+        print(f"{card.name} ({card.code})")
+        for sig in knowledge.signatures(card.code):
+            print("\n".join(_card_line(store, sig)))
+        return 0
+    if args.action == "plan":
+        if not args.card:
+            raise ValueError("aide plan needs --card NAME")
+        from deepyugioh.generator.aide.index import EffectIndex
+        from deepyugioh.generator.aide.planner import Planner
+
+        cfg = _config(args).candidates
+        card = store.resolve(args.card)
+        planner = Planner(EffectIndex(knowledge), max_cards=_config(args).limits.max_cards,
+                          branching=cfg.aide_branching, plans_per_root=cfg.aide_plans_per_card)
+        forward = planner.forward(card.code)
+        backward, rejected = planner.backward(card.code)
+        for plan in forward + backward:
+            print(f"\n{plan.planner} plan {plan.id}: {plan.links} links - "
+                  + ", ".join(f"{store.name(c)} ({z})" for c, z in plan.start))
+            for st in plan.steps:
+                moved = "; ".join(f"{store.name(c)} {a}->{b}" for c, a, b in st.moved)
+                action = "Normal Summon" if st.action == "normal_summon" else f"effect {st.action}"
+                print(f"   {store.name(st.code)}: {action}  [{moved}]" + ("  LINK" if st.links else ""))
+        for r in rejected:
+            print(f"\nrejected: {r['reason']}")
+        if not forward and not backward:
+            print("no plan found")
+        return 0
+    if args.action == "report":
+        from deepyugioh.generator import JobStore
+        from deepyugioh.generator.aide.hypotheses import HypothesisStore
+        from deepyugioh.repository.combo_db import ComboRepository
+
+        hyp = HypothesisStore()
+        counts = hyp.update_status(JobStore().jobs_for, ComboRepository().cards_for_runs)
+        print("AIDE hypotheses: " + (", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "none yet"))
+        for row in hyp.list(status=args.status, limit=args.limit):
+            names = ", ".join(f"{store.name(c)} ({z})" for c, z in row["cards"])
+            print(f"  {row['status']:<18} {row['planner']:<8} {row['links']} links  {names}"
+                  + (f"  - {row['reason']}" if row["reason"] else ""))
+        return 0
+    raise ValueError(f"unknown aide action {args.action}")
+
+
+def cmd_benchmark(args) -> int:
+    from deepyugioh import paths
+    from deepyugioh.benchmark import BenchmarkSettings, run_benchmark
+
+    raw = args.budget.strip()
+    kind = "seconds" if raw.endswith("s") else "searches"
+    settings = BenchmarkSettings(budget=int(raw.rstrip("s")), budget_kind=kind, workers=args.workers or 4,
+                                 variants=tuple(args.variants))
+    out = Path(args.out) if args.out else paths.DATA / "benchmark" / __import__("time").strftime("%Y%m%d-%H%M%S")
+    run_benchmark(settings, out)
+    print((out / "benchmark.md").read_text())
+    print(f"written to {out}")
+    return 0
+
+
 def cmd_testmode(args) -> int:
     from deepyugioh import settings
 
@@ -257,6 +368,21 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--limit", type=int, default=50)
     c.add_argument("--lines", action="store_true")
     c.set_defaults(fn=cmd_combos)
+
+    a = sub.add_parser("aide", help="AIDE: effect signatures, plans and hypothesis status")
+    a.add_argument("action", choices=["build", "stats", "explain", "plan", "report"])
+    a.add_argument("--card", help="card name or code (explain, plan)")
+    a.add_argument("--status", help="report: only hypotheses with this status, e.g. VALIDATED")
+    a.add_argument("--limit", type=int, default=30)
+    a.add_argument("--config", help="TOML generator configuration")
+    a.set_defaults(fn=cmd_aide)
+
+    b = sub.add_parser("benchmark", help="compare tiers 1-4, AIDE and the hybrid tier on a fixed card subset")
+    b.add_argument("--budget", default="300s", help="per variant: number of searches, or seconds with suffix s (default 300s)")
+    b.add_argument("--workers", type=int)
+    b.add_argument("--variants", nargs="+", default=["baseline", "hybrid", "aide"], choices=["baseline", "hybrid", "aide"])
+    b.add_argument("--out", help="output directory (default data/benchmark/<time>)")
+    b.set_defaults(fn=cmd_benchmark)
 
     t = sub.add_parser("testmode", help="show or switch test mode (enables the test GUI)")
     t.add_argument("state", nargs="?", choices=["on", "off"])

@@ -108,7 +108,10 @@ class BoardState:
         own = self.key()[0][0]
         if not zones_matter:
             lp, hand, mz, sz, gy, ban = own
-            mz = tuple(sorted(("M" if seq < 5 else seq, code, pos, ov) for seq, code, pos, ov in mz))
+            # main zones become "M", extra monster zones keep their number; the sort key keeps both
+            # comparable (main zones first) without changing the identity of boards that sorted before
+            mz = tuple(sorted((("M" if seq < 5 else seq, code, pos, ov) for seq, code, pos, ov in mz),
+                              key=lambda t: (t[0] != "M", 0 if t[0] == "M" else t[0], t[1:])))
             own = (lp, hand, mz, sz, gy, ban)
         (s_lp, s_hand, s_m, s_s, s_gy, s_ban), (e_lp, e_hand, e_m, e_s, e_gy, e_ban) = start.key()[0][1], self.key()[0][1]
 

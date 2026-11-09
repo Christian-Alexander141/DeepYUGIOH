@@ -136,9 +136,20 @@
     <li><a href="#daten">8. Datenhaltung</a></li>
     <li><a href="#schnittstellen">9. Schnittstellen</a></li>
     <li><a href="#gui-technik">10. GUI-Technik und Vorlage für weitere Stufen</a></li>
-    <li><a href="#tests">11. Tests</a></li>
-    <li><a href="#grenzen-offen">12. Bekannte Grenzen</a></li>
-    <li><a href="#lizenz">13. Lizenz</a></li>
+    <li><a href="#aide">11. AIDE: algorithmische Suche</a>
+      <ol>
+        <li><a href="#aide-ablauf">Ablauf</a></li>
+        <li><a href="#aide-signatur">Effect Signatures</a></li>
+        <li><a href="#aide-planung">Index, Regeln, Planer</a></li>
+        <li><a href="#aide-status">Kandidaten-Pool und Status</a></li>
+        <li><a href="#aide-einbindung">Einbindung und Sicherheit</a></li>
+        <li><a href="#aide-benchmark">Benchmark</a></li>
+        <li><a href="#aide-grenzen">Grenzen und nächste Schritte</a></li>
+      </ol>
+    </li>
+    <li><a href="#tests">12. Tests</a></li>
+    <li><a href="#grenzen-offen">13. Bekannte Grenzen</a></li>
+    <li><a href="#lizenz">14. Lizenz</a></li>
   </ol>
 </nav>
 
@@ -156,7 +167,7 @@
 
 <figure>
   <img src="images/gui-globaler-lauf.png" alt="Test-GUI während eines globalen Laufs: Seitenleiste, Kopfleiste mit Fortschritt, Kennzahlen, Abdeckung und Protokoll">
-  <figcaption>Die Test-GUI während eines globalen Laufs über Stufe 2.</figcaption>
+  <figcaption>Die Test-GUI während eines globalen Laufs über Stufe 1 mit dem Ziel 60 neue Combos.</figcaption>
 </figure>
 
 <!-- ============================================================ -->
@@ -176,7 +187,7 @@
 <div class="flow" role="img" aria-label="Stufen des Gesamtsystems">
   <div class="node"><b>Card Knowledge System</b><span>Kartenpool, Texte, Skripte, Effektanalyse, Interaktionsgraph</span></div>
   <div class="arrow">CardPool, InteractionGraph</div>
-  <div class="node now"><b>Combo Generator (Phase 1, diese Dokumentation)</b><span>Startaufbauten, erschöpfende Suche, Validierung per Replay</span></div>
+  <div class="node now"><b>Combo Generator (Phase 1, diese Dokumentation)</b><span>Startaufbauten aus dem Graphen und aus AIDE-Plänen, erschöpfende Suche, Validierung per Replay</span></div>
   <div class="arrow">ComboSink</div>
   <div class="node"><b>Database 1: Combo Repository</b><span>nur Combos, keine Bewertungen</span></div>
   <div class="arrow">ComboReader (nur lesend)</div>
@@ -193,10 +204,11 @@
 <h3>Module im Code</h3>
 <div class="table-wrap"><table>
   <tr><th>Paket</th><th>Aufgabe</th><th>Wichtige Dateien</th></tr>
-  <tr><td><code>deepyugioh.contracts</code></td><td>Verträge zwischen den Modulen: Datentypen und Protokolle. Module kennen einander nur hierüber.</td><td><code>cards.py</code>, <code>setups.py</code>, <code>combos.py</code></td></tr>
-  <tr><td><code>deepyugioh.cards</code></td><td>Card Knowledge System, Schritte 1–3: Import der Kartendaten (BabelCDB) und Skripte (CardScripts), statische Skriptanalyse, Interaktionsgraph mit Helferrollen.</td><td><code>importer.py</code>, <code>effects.py</code>, <code>references.py</code>, <code>graph.py</code>, <code>store.py</code></td></tr>
+  <tr><td><code>deepyugioh.contracts</code></td><td>Verträge zwischen den Modulen: Datentypen und Protokolle. Module kennen einander nur hierüber.</td><td><code>cards.py</code>, <code>setups.py</code>, <code>combos.py</code>, <code>effects.py</code> (Effect Signatures)</td></tr>
+  <tr><td><code>deepyugioh.cards</code></td><td>Card Knowledge System, Schritte 1–3: Import der Kartendaten (BabelCDB) und Skripte (CardScripts), statische Skriptanalyse, Interaktionsgraph mit Helferrollen.</td><td><code>importer.py</code>, <code>effects.py</code>, <code>references.py</code>, <code>graph.py</code>, <code>store.py</code>, <code>lua.py</code> und <code>signatures.py</code> (Effect Signatures)</td></tr>
   <tr><td><code>deepyugioh.engine</code></td><td>ctypes-Anbindung an ygopro-core (API 11): Duell erzeugen, Nachrichten lesen, Antworten senden, Spielzustand abfragen.</td><td><code>ocg.py</code>, <code>duel.py</code>, <code>messages.py</code>, <code>constants.py</code></td></tr>
-  <tr><td><code>deepyugioh.generator</code></td><td>Combo Generator, Schritte 4–5: Startaufbauten, Tiefensuche, Nutzenmessung, Validierung, fortsetzbare parallele Läufe.</td><td><code>service.py</code>, <code>candidates.py</code>, <code>config.py</code>, <code>jobs.py</code>, <code>search/*</code></td></tr>
+  <tr><td><code>deepyugioh.generator</code></td><td>Combo Generator, Schritte 4–5: Startaufbauten, Tiefensuche, Nutzenmessung, Validierung, fortsetzbare parallele Läufe.</td><td><code>service.py</code>, <code>candidates.py</code>, <code>config.py</code>, <code>jobs.py</code>, <code>search/*</code>, <code>aide/*</code> (AIDE, Stufen 5–7)</td></tr>
+  <tr><td><code>deepyugioh.benchmark</code></td><td>Vergleich der Stufen 1–4 mit AIDE und der Hybridstufe auf einer festen Kartenmenge.</td><td><code>benchmark.py</code></td></tr>
   <tr><td><code>deepyugioh.repository</code></td><td>Database 1 (SQLite), implementiert <code>ComboSink</code> und <code>ComboReader</code>.</td><td><code>combo_db.py</code></td></tr>
   <tr><td><code>deepyugioh.settings</code></td><td>Dauerhafte lokale Einstellungen (<code>deepyugioh.toml</code>), Testmodus, GUI-Design.</td><td><code>settings.py</code></td></tr>
   <tr><td><code>deepyugioh.gui</code></td><td>Test-GUI (tkinter), nur im Testmodus.</td><td><code>app.py</code>, <code>theme.py</code>, <code>format.py</code></td></tr>
@@ -264,7 +276,11 @@ uv run pytest                             # Tests gegen die echte Engine</code><
   <tr><td>2</td><td>NAMED/RESTRICTED-Paare: eine Karte nennt die andere oder ihren Archetyp</td><td>133.164</td><td>etwa 1 Tag</td></tr>
   <tr><td>3</td><td>CONSTRAINED-Paare: generischer Effekt mit Filter, z. B. Level ≤ 2</td><td>1.502.412</td><td>Wochen</td></tr>
   <tr><td>4</td><td>GENERIC-Paare: „irgendein Monster“</td><td>9.810.700</td><td>Monate</td></tr>
+  <tr><td>5</td><td>AIDE vorwärts: mehrstufige Pläne aus jeder Startkarte (<a href="#aide">Abschnitt 11</a>)</td><td>erst nach der Planung bekannt</td><td>–</td></tr>
+  <tr><td>6</td><td>AIDE rückwärts: Pläne, die eine Karte dorthin bringen, wo ihr Effekt wirkt</td><td>erst nach der Planung bekannt</td><td>–</td></tr>
+  <tr><td>7</td><td>HYBRID: Stufen 1–4 in unveränderter Reihenfolge, abwechselnd mit AIDE-Plänen</td><td>Summe aus 1–6</td><td>–</td></tr>
 </table></div>
+<p>Die Stufen 5 bis 7 sind <strong>optional</strong>. Standard bleiben die Stufen 1 bis 4, und deren Ergebnisse sind unverändert (siehe <a href="#aide-einbindung">Einbindung und Sicherheit</a>).</p>
 
 <h3 id="grenzen">Suchgrenzen und Pruning</h3>
 <p>Innerhalb der Grenzen ist die Suche erschöpfend. Jede überschrittene Grenze wird im Lauf als Abbruchgrund gespeichert (<code>runs.incomplete</code>). Ein Lauf ist nur dann <em>vollständig</em>, wenn keine Grenze erreicht wurde. Diese Abbruchgründe sind das wichtigste Werkzeug zum Feintuning, siehe <a href="#gui-tuning">Läufe &amp; Tuning</a>.</p>
@@ -315,11 +331,16 @@ uv run pytest                             # Tests gegen die echte Engine</code><
 <h3 id="ref-candidates">Startaufbauten <code>[candidates]</code> (globale Suche)</h3>
 <div class="table-wrap"><table>
   <tr><th>Schlüssel</th><th>GUI-Feld</th><th>CLI</th><th>Standard</th><th>Bereich</th><th>Wirkung</th></tr>
-  <tr><td><code>tiers</code></td><td>Stufen</td><td><code>generate --tiers</code></td><td>[1, 2, 3, 4]</td><td>1–4</td><td>Welche Stufen ein Lauf bearbeitet und in welcher Reihenfolge. Auf der GUI-Seite „Globaler Lauf“ lässt sich das pro Lauf überschreiben.</td></tr>
+  <tr><td><code>tiers</code></td><td>Stufen</td><td><code>generate --tiers</code></td><td>[1, 2, 3, 4]</td><td>1–7</td><td>Welche Stufen ein Lauf bearbeitet und in welcher Reihenfolge. Auf der GUI-Seite „Globaler Lauf“ lässt sich das pro Lauf überschreiben.</td></tr>
   <tr><td><code>opponent_boards</code></td><td>Gegnerfelder</td><td>–</td><td>["empty", "standard"]</td><td>definierte Felder</td><td>Gegen welche Gegnerfelder jeder Kandidat gesucht wird. Jedes Feld verdoppelt die Kandidatenzahl.</td></tr>
   <tr><td><code>max_deck_neighbors</code></td><td>Max. Deck-Nachbarn</td><td>–</td><td>15</td><td>0–200</td><td>Karten aus der Interaktions-Nachbarschaft im Deck. Wird gekappt, ist der Lauf unvollständig.</td></tr>
   <tr><td><code>max_extra</code></td><td>Max. Extra Deck</td><td>–</td><td>15</td><td>0–200</td><td>Größe des Extra Decks im Startaufbau (im echten Spiel 15).</td></tr>
   <tr><td><code>enablers</code></td><td>Hilfskarten ergänzen</td><td>–</td><td>an</td><td>an/aus</td><td>Generische Helfer (Foolish Burial, Monster Reborn, Soul Release) ergänzen, wenn Karten sie brauchen.</td></tr>
+  <tr><td><code>aide_share</code></td><td>Anteil AIDE in Stufe 7</td><td>–</td><td>0.5</td><td>0,05–0,95</td><td>Anteil der Suchen, die in der Hybridstufe an AIDE-Pläne gehen.</td></tr>
+  <tr><td><code>aide_plans_per_card</code></td><td>Pläne pro Karte</td><td>–</td><td>6</td><td>1–100</td><td>So viele Pläne behält der Planer pro Start- bzw. Zielkarte (die besten nach Zahl der Verknüpfungen).</td></tr>
+  <tr><td><code>aide_branching</code></td><td>Verzweigung pro Effekt</td><td>–</td><td>4</td><td>1–50</td><td>So viele Karten probiert der Planer für jede Bewegung eines Effekts aus (z. B. welche Karte Foolish Burial schickt).</td></tr>
+  <tr><td><code>aide_neighbors</code></td><td>Zusätzliche Deck-Nachbarn</td><td>–</td><td>0</td><td>0–200</td><td>Weitere Karten aus der Interaktions-Nachbarschaft im Startaufbau eines Plans.</td></tr>
+  <tr><td><code>aide_helpers</code></td><td>Hilfskarten ergänzen (AIDE)</td><td>–</td><td>aus</td><td>an/aus</td><td>Dieselben Helfer wie in den Stufen 1–4 auch in AIDE-Aufbauten. Im Benchmark langsamer und mit weniger Combos, daher standardmäßig aus.</td></tr>
 </table></div>
 
 <h3 id="ref-run">Ausführung (oberste Ebene)</h3>
@@ -372,6 +393,8 @@ opponent_boards = ["empty", "standard", "wall"]</code></pre>
   <tr><td><code>generate</code></td><td>globale Suche starten oder fortsetzen</td><td><code>--tiers</code>, <code>--target</code> N (bis N neue Combos), <code>--benefit</code> (nur Combos mit diesem Nutzen zählen, z. B. <code>wins</code>), <code>--max-jobs</code>, <code>--time-budget</code> (s), <code>--workers</code>, <code>--report-every</code> (50)</td></tr>
   <tr><td><code>search</code></td><td>einen Startaufbau durchsuchen</td><td><code>--hand</code> (Pflicht), <code>--deck</code>, <code>--extra</code>, <code>--opponent</code> (<code>empty</code>), <code>--branch-zones</code>, <code>--show</code> (10), <code>--lines</code>, <code>--no-store</code></td></tr>
   <tr><td><code>combos</code></td><td>Database 1 abfragen</td><td><code>--card</code>, <code>--positive</code>, <code>--max-cards</code>, <code>--limit</code> (50), <code>--lines</code></td></tr>
+  <tr><td><code>aide</code></td><td>AIDE: Effect Signatures bauen und anzeigen, Pläne für eine Karte, Status der Hypothesen</td><td><code>build</code>, <code>stats</code>, <code>explain --card</code>, <code>plan --card</code>, <code>report [--status VALIDATED]</code></td></tr>
+  <tr><td><code>benchmark</code></td><td>Stufen 1–4, AIDE und Hybrid auf einer festen Kartenmenge vergleichen (eigene Datenbanken, Database 1 bleibt unberührt)</td><td><code>--budget</code> (Suchen oder Sekunden mit <code>s</code>, Standard <code>300s</code>), <code>--workers</code>, <code>--variants</code>, <code>--out</code></td></tr>
   <tr><td><code>testmode</code></td><td>Testmodus anzeigen oder umschalten</td><td><code>on</code> / <code>off</code></td></tr>
   <tr><td><code>gui</code></td><td>Test-GUI starten (nur im Testmodus)</td><td>–</td></tr>
 </table></div>
@@ -382,7 +405,10 @@ uv run deepyugioh generate --tiers 1 2 3 --workers 8 --target 100 --benefit wins
 uv run deepyugioh search --hand "Junk Synchron" "Foolish Burial" \
     --deck Doppelwarrior Tuningware --extra "Junk Warrior" "Stardust Dragon" \
     --opponent standard --lines
-uv run deepyugioh combos --positive opp_field_loss --lines</code></pre>
+uv run deepyugioh combos --positive opp_field_loss --lines
+uv run deepyugioh aide plan --card "Junk Converter"                                  # AIDE-Pläne einer Karte
+uv run deepyugioh generate --tiers 7 --workers 8 --time-budget 3600                    # Hybridlauf
+uv run deepyugioh benchmark --budget 300s --workers 7</code></pre>
 
 <!-- ============================================================ -->
 <h2 id="gui">7. Test-GUI</h2>
@@ -409,8 +435,8 @@ uv run deepyugioh testmode off     # wieder ausschalten</code></pre>
 
 <h3 id="gui-einstellungen">Seite Einstellungen</h3>
 <figure>
-  <img src="images/gui-einstellungen.png" alt="Einstellungsseite mit den Karten Suchgrenzen, Ausführung und Startaufbauten">
-  <figcaption>Alle Parameter aus <a href="#einstellungen">Abschnitt 5</a> in drei Karten: Suchgrenzen, Ausführung, Startaufbauten.</figcaption>
+  <img src="images/gui-einstellungen.png" alt="Einstellungsseite mit den Karten Suchgrenzen, Ausführung, Startaufbauten und AIDE">
+  <figcaption>Alle Parameter aus <a href="#einstellungen">Abschnitt 5</a> in vier Karten: Suchgrenzen, Ausführung, Startaufbauten (mit den Stufen 1 bis 7) und AIDE.</figcaption>
 </figure>
 <ul>
   <li><strong>Speichern</strong> prüft die Werte und schreibt sie nach <code>deepyugioh.toml</code>.</li>
@@ -500,9 +526,11 @@ uv run deepyugioh testmode off     # wieder ausschalten</code></pre>
 <p>Alle erzeugten Daten liegen in <code>data/</code> und sind nicht versioniert.</p>
 <div class="table-wrap"><table>
   <tr><th>Datei</th><th>Inhalt</th><th>Erzeugt von</th></tr>
-  <tr><td><code>cards.sqlite</code></td><td>Karten, analysierte Effekte, Referenzen und Interaktionsgraph</td><td><code>import-cards</code></td></tr>
+  <tr><td><code>cards.sqlite</code></td><td>Karten, analysierte Effekte, Referenzen, Interaktionsgraph und Effect Signatures (<code>effect_signatures</code>, <code>signature_meta</code>)</td><td><code>import-cards</code>; die Signaturen auch <code>aide build</code> oder automatisch beim ersten Einsatz von AIDE (etwa 20 s)</td></tr>
   <tr><td><code>combos.sqlite</code></td><td>Database 1: Combos und Läufe</td><td>Generator über <code>ComboSink</code></td></tr>
   <tr><td><code>generator.sqlite</code></td><td>Fortschritt der globalen Suche: erledigte Kandidaten und Cursor pro Stufe</td><td>Generator (<code>JobStore</code>)</td></tr>
+  <tr><td><code>aide.sqlite</code></td><td>Kandidaten-Pool von AIDE: Pläne (Hypothesen) mit Status, Herkunft und Startaufbauten, abgelehnte Rückwärts-Ansätze, Plan-Cache pro Wurzelkarte</td><td>AIDE (<code>HypothesisStore</code>)</td></tr>
+  <tr><td><code>benchmark/&lt;Zeit&gt;/</code></td><td>Benchmark-Bericht (<code>benchmark.md</code>, <code>benchmark.json</code>) und je Variante eigene Datenbanken</td><td><code>benchmark</code></td></tr>
 </table></div>
 <h3>Database 1 (<code>combos.sqlite</code>)</h3>
 <div class="table-wrap"><table>
@@ -538,6 +566,8 @@ gen.coverage()                                 # Abdeckung pro Stufe</code></pre
   <tr><td><code>ComboSink</code></td><td>Generator → Database 1</td><td><code>repository.combo_db.ComboRepository</code></td></tr>
   <tr><td><code>ComboReader</code></td><td>Database 1 → Analyzer (Phase 2)</td><td><code>repository.combo_db.ComboRepository</code></td></tr>
   <tr><td><code>ProgressListener</code></td><td>Generator → Fortschrittsanzeige (CLI, GUI)</td><td><code>on_job(JobReport)</code></td></tr>
+  <tr><td><code>EffectKnowledge</code></td><td>Effect Signatures → AIDE</td><td><code>cards.signatures.SignatureStore</code></td></tr>
+  <tr><td><code>CandidateSource.tier_version</code> (optional)</td><td>Cursor-Schlüssel pro Stufe</td><td><code>generator.aide.source.HybridCandidateSource</code></td></tr>
 </table></div>
 
 <!-- ============================================================ -->
@@ -579,7 +609,129 @@ gen.coverage()                                 # Abdeckung pro Stufe</code></pre
 <p class="muted">Sobald eine zweite Stufe eine GUI bekommt, lohnt es sich, Hülle und Bausteine aus <code>gui/app.py</code> in ein gemeinsames Modul (etwa <code>gui/shell.py</code>) zu verschieben, sodass jede Stufe nur ihre Seiten beisteuert.</p>
 
 <!-- ============================================================ -->
-<h2 id="tests">11. Tests</h2>
+<h2 id="aide">11. AIDE: algorithmische Suche</h2>
+<p><strong>AIDE</strong> (Algorithmic Interaction Discovery Engine) ergänzt die bisherige Suche um eine zweite Quelle für Startaufbauten. Die Stufen 1 bis 4 bilden Paare aus dem Interaktionsgraphen. AIDE liest dagegen aus den Kartenskripten, <em>was</em> jeder Effekt tut. Daraus plant es <strong>mehrstufige Ketten</strong>, etwa „Junk Converter wirft Jet Synchron ab und sucht Quickdraw Synchron, Jet Synchron holt sich aus dem Friedhof …“. Jeder Plan ist nur eine Hypothese. Er wird zu einem gewöhnlichen Startaufbau, den die bestehende Suche vollständig durchsucht und per Replay validiert. In Database 1 kommen weiterhin nur Combos, die die Engine gefunden und bestätigt hat.</p>
+<p>Leitfrage: <em>Findet das algorithmische Verständnis der Effekte mehr neue, regelkonforme Combos als die reine Simulation, bei gleichem oder geringerem Rechenaufwand?</em> Die Antwort steht im <a href="#aide-benchmark">Benchmark</a>.</p>
+
+<h3 id="aide-ablauf">Ablauf</h3>
+<div class="flow" role="img" aria-label="Ablauf von AIDE">
+  <div class="node"><b>Lua-Kartenskripte</b><span>CardScripts, 13.536 Skripte</span></div>
+  <div class="arrow">cards/lua.py, cards/signatures.py</div>
+  <div class="node"><b>Effect Signatures</b><span>pro Effekt: Ort, Auslöser, Bedingungen, Kosten, Bewegungen, Limit, Unbekanntes</span></div>
+  <div class="arrow">EffectKnowledge</div>
+  <div class="row">
+    <div class="node"><b>Producer/Consumer-Index</b><span>wer bringt Karten wohin, wer nutzt sie dort</span></div>
+    <div class="node"><b>Regelprüfung</b><span>nur sicher Unmögliches wird verworfen</span></div>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node now"><b>Vorwärtsplaner (Stufe 5)</b><span>von einer Startkarte auf der Hand aus</span></div>
+    <div class="node now"><b>Rückwärtsplaner (Stufe 6)</b><span>vom Ziel „Karte wirkt im Friedhof/Feld“ aus</span></div>
+  </div>
+  <div class="arrow">Pläne</div>
+  <div class="node"><b>Kandidaten-Pool (aide.sqlite)</b><span>Status, Herkunft, Plan-Cache</span></div>
+  <div class="arrow">Startaufbauten (Stufen 5, 6, Hybrid 7)</div>
+  <div class="node"><b>Bestehende Suche + Replay-Validierung</b><span>unverändert, die Engine entscheidet</span></div>
+  <div class="arrow">ComboSink</div>
+  <div class="node"><b>Database 1</b><span>nur validierte Combos, keine Bewertungen</span></div>
+</div>
+
+<h3 id="aide-signatur">Effect Signatures</h3>
+<p>Ein kleiner Lua-Leser (<code>cards/lua.py</code>) findet Funktionen, Blöcke und Aufrufe und zerlegt boolesche Ausdrücke. <code>cards/signatures.py</code> folgt für jeden Effekt den Funktionen, auf die er zeigt (<code>SetCost</code>, <code>SetTarget</code>, <code>SetOperation</code>, <code>SetCondition</code>), und baut daraus eine <code>EffectSignature</code> (<code>contracts/effects.py</code>):</p>
+<div class="table-wrap"><table>
+  <tr><th>Feld</th><th>Bedeutung</th><th>Beispiel</th></tr>
+  <tr><td><code>kind</code>, <code>location</code></td><td>Art (ACTIVATE, IGNITION, QUICK, TRIGGER, SUMMON_PROC, CONTINUOUS) und wo die Karte sein muss</td><td>Sangan: TRIGGER im Friedhof</td></tr>
+  <tr><td><code>trigger</code></td><td>Ereignis und ob es dieser Karte passieren muss</td><td><code>TO_GRAVE</code>, nur diese Karte, Pflicht</td></tr>
+  <tr><td><code>conditions</code></td><td>erkannte Voraussetzungen, sonst <code>UNKNOWN:&lt;Funktion&gt;</code></td><td><code>PREVIOUS:MZONE+SZONE</code></td></tr>
+  <tr><td><code>costs</code>, <code>moves</code></td><td>Bewegungen „Karten mit Bedingung X von Zone A nach Zone B“, als Kosten oder Effekt; <code>what = None</code> heißt „diese Karte“</td><td>Dark Grepher: Kosten „DARK von der Hand ins Grab“, Effekt „DARK vom Deck ins Grab“</td></tr>
+  <tr><td><code>count_limit</code></td><td><code>OPT</code> oder <code>HOPT:&lt;Schlüssel&gt;</code> (geteilte Limits über den Schlüssel)</td><td><code>HOPT:id</code></td></tr>
+  <tr><td><code>unknown</code>, <code>confidence</code></td><td>alles, was nicht sicher gelesen werden konnte, und eine daraus abgeleitete Sicherheit</td><td><code>condition s.spcon</code>, 0.85</td></tr>
+</table></div>
+<p>Filter werden zu <code>Condition</code>-Objekten: eine ODER-Liste von <code>CardFilter</code>-Alternativen, jede ein UND aus Kartentyp, Level, Typ, Attribut, ATK/DEF, Archetypen und Kartennamen. Alternative Wege bleiben dadurch erhalten (<code>IsLevel(1) or IsSetCard(…)</code> ergibt zwei Alternativen). <strong>Unbekannte Prädikate schließen nie eine Karte aus</strong>, sie stehen nur in <code>unknown</code>. Ein LLM wird nicht verwendet, nichts wird geraten.</p>
+<div class="cards">
+  <div class="card"><h4>13.536 Skripte</h4><p>in etwa 20 s, ohne einen Extraktionsfehler</p></div>
+  <div class="card"><h4>20.509 Effekte</h4><p>aktivierbar; 72 % davon mit konkreter Bewegung oder Ziehen</p></div>
+  <div class="card"><h4>30 %</h4><p>mit unbekannten Teilen außerhalb der Bedingungen (58 % mit Bedingungen)</p></div>
+  <div class="card"><h4>0,82</h4><p>mittlere Sicherheit</p></div>
+</div>
+<p>Die meisten unbekannten Teile sind Bedingungsfunktionen. Sie sind so verschieden, dass sie bewusst als <code>UNKNOWN</code> stehen bleiben. <code>deepyugioh aide explain --card NAME</code> zeigt die Signaturen einer Karte.</p>
+
+<h3 id="aide-planung">Index, Regeln, Planer</h3>
+<ul>
+  <li><strong>Producer/Consumer-Index</strong> (<code>generator/aide/index.py</code>): Ein <em>Producer</em> ist ein Effekt, der Karten in eine Zone bringt. Er ist nach Zielzone und nach genannten Karten bzw. Archetypen indiziert. Ein <em>Consumer</em> ist eine Karte, die in einer Zone einen Effekt nutzen kann. Zuerst stehen Karten, deren Effekt die Kette weiterführt. Gesucht wird per Nachschlagen plus Filterprüfung auf kurzen Listen, nie „jeder gegen jeden“.</li>
+  <li><strong>Regelprüfung</strong> (<code>constraints.py</code>): Verworfen wird nur, was im ersten Zug sicher unmöglich ist. Dazu gehören Friedhofseffekte mit „nicht in dem Zug, in dem sie gelegt wurde“ (<code>aux.exccon</code>), Kampf- oder Ziehauslöser, Fallen (müssen einen Zug vorher gesetzt werden), Zauber, die beschworen werden sollen, und Extra-Deck-Monster, die auf die Hand sollen. Was unsicher ist, bleibt erlaubt.</li>
+  <li><strong>Abstrakter Zustand</strong> (<code>planner.py</code>): Pro Karte des Plans ist nur ihre Zone bekannt, dazu die verbrauchten Limits und die Normalbeschwörung. Aktionen sind die Normalbeschwörung (Level 1–4), Effekte einer Karte in passender Zone (Kosten zuerst) und Auslöser der Ereignisse des letzten Schritts.</li>
+  <li><strong>Vorwärts</strong>: von einer Startkarte auf der Hand aus. Braucht ein Effekt eine Karte („1 Krieger vom Deck“), probiert der Planer bis zu <code>aide_branching</code> Karten aus. Zuerst genannte, dann verwandte (Name, Archetyp), dann generische Consumer.</li>
+  <li><strong>Rückwärts</strong>: vom Ziel „Karte G wirkt im Friedhof / verbannt / auf dem Feld“ aus. Gesucht wird, welche Producer G dorthin bringen und wie diese selbst aktiviert werden (Hand, Normalbeschwörung, bis zu zwei Ebenen). Der Vorwärtsplaner vervollständigt diesen Ansatz dann; beide Richtungen teilen denselben Zustand.</li>
+  <li><strong>Plan</strong>: Ein Plan entsteht, wenn eine Aktion eine <em>Verknüpfung</em> nutzt, also eine Karte oder Ressource, die ein anderer Effekt bereitgestellt hat. Er hat 2 bis <code>max_cards</code> Karten. Pro Wurzelkarte bleiben die <code>aide_plans_per_card</code> Pläne mit den meisten Verknüpfungen.</li>
+</ul>
+<pre><code>uv run deepyugioh aide plan --card "Junk Converter"
+forward plan …: 3 links - Jet Synchron (HAND), Junk Converter (HAND), Starjunk Synchron (HAND),
+                          Synchro Fusionist (HAND), Quickdraw Synchron (DECK)
+   Junk Converter: effect  [Jet Synchron HAND->GRAVE; Quickdraw Synchron DECK->HAND]
+   Jet Synchron: effect    [Starjunk Synchron HAND->GRAVE; Jet Synchron GRAVE->MZONE]  LINK
+   Starjunk Synchron: effect [Starjunk Synchron GRAVE->BANISHED]  LINK
+   Quickdraw Synchron: effect [Synchro Fusionist HAND->GRAVE; Quickdraw Synchron HAND->MZONE]  LINK</code></pre>
+<p>Ein Plan wird zu einem Startaufbau wie in den Stufen 1–4: Hand = Handkarten des Plans, Deck = die Deckkarten des Plans plus eine zweite Kopie jeder Handkarte, Extra Deck = verwandte Extra-Deck-Monster (bis <code>max_extra</code>). Mit <code>aide_neighbors</code> und <code>aide_helpers</code> lassen sich Nachbarn und Helfer ergänzen.</p>
+
+<h3 id="aide-status">Kandidaten-Pool und Status</h3>
+<p>Jeder Plan steht mit Herkunft (Planer, Wurzelkarte, Schritte, Verknüpfungen) und Startaufbauten in <code>data/aide.sqlite</code>. Database 1 wird dafür nicht verändert. <code>deepyugioh aide report</code> leitet den Status aus den Ergebnissen des Generators ab:</p>
+<div class="table-wrap"><table>
+  <tr><th>Status</th><th>Bedeutung</th></tr>
+  <tr><td><code>ABSTRACT_REJECTED</code></td><td>Rückwärts-Ansatz, den die Regelprüfung nicht vervollständigen konnte; mit Grund gespeichert, nicht simuliert</td></tr>
+  <tr><td><code>ABSTRACT_VALID</code></td><td>Die Schritte passen im abstrakten Zustand zusammen</td></tr>
+  <tr><td><code>SIMULATION_PENDING</code></td><td>als Startaufbau an den Generator übergeben, noch nicht durchsucht</td></tr>
+  <tr><td><code>VALIDATED</code></td><td>Die Engine hat eine validierte Combo gefunden, die alle Karten des Plans nutzt</td></tr>
+  <tr><td><code>INVALID</code></td><td>Alle Suchen seiner Aufbauten waren vollständig, eine solche Combo gibt es dort nicht</td></tr>
+  <tr><td><code>INCONCLUSIVE</code></td><td>Eine Suche stieß an eine Grenze, bevor das klar war</td></tr>
+  <tr><td><code>UNSUPPORTED</code></td><td>Eine Suche ist fehlgeschlagen (z. B. Skriptfehler)</td></tr>
+</table></div>
+<p>Ein negatives Ergebnis gilt nur für diesen Startaufbau und diese Grenzen. Es wird nicht auf ähnliche Karten übertragen. Andere Combos aus denselben Suchen werden unabhängig vom Planstatus ganz normal in Database 1 gespeichert. Pläne werden pro Version und Wurzelkarte zwischengespeichert, ein fortgesetzter Lauf muss also nicht neu planen. Doppelte Kandidaten aus Graph und AIDE werden über die Startaufbau-ID erkannt: Innerhalb der Hybridstufe werden sie verworfen, erledigte werden übersprungen.</p>
+
+<h3 id="aide-einbindung">Einbindung und Sicherheit</h3>
+<ul>
+  <li><strong>Opt-in:</strong> Die Standardstufen bleiben 1–4. AIDE läuft nur, wenn die Stufen 5, 6 oder 7 gewählt werden (Einstellungen, Seite Globaler Lauf oder <code>generate --tiers</code>).</li>
+  <li><strong>Keine neue Ausführungsschicht:</strong> AIDE ist eine <code>CandidateSource</code>. <code>HybridCandidateSource</code> reicht die Stufen 1–4 unverändert an <code>GraphCandidateSource</code> durch, liefert 5 und 6 aus AIDE und mischt in Stufe 7 nach <code>aide_share</code> (Stufen 1–4 in Originalreihenfolge, AIDE vorwärts und rückwärts im Wechsel).</li>
+  <li><strong>Fortsetzen:</strong> Die einzige Änderung am Generator ist ein optionaler Cursor-Schlüssel pro Stufe (<code>tier_version</code>). Für die Stufen 1–4 ist er die bisherige Graph-Version, vorhandene Fortschrittsdaten gelten also weiter.</li>
+  <li><strong>Nachweis, dass die Standardsuche unverändert ist:</strong> Vor dem Umbau wurden die ersten 80 Kandidaten der Stufen 1 und 2 durchsucht und festgehalten (160 Suchen, 945 Combos). Dieselbe Messung nach dem Umbau, auch nach dem Engine-Fix, ergab identische Knotenzahlen, Vollständigkeit und Fundzahlen jeder Suche und dieselben 945 Combo-Signaturen. Zuvor wurde bestätigt, dass die Messung reproduzierbar ist.</li>
+  <li><strong>Gefundener Fehler:</strong> Ein AIDE-Aufbau deckte einen Absturz in der Combo-Identität auf. Er tritt auf, wenn ein Monster in einer Extra-Monsterzone und eines in einer Hauptzone stehen, ohne Link-Monster auf dem Feld. Das konnte auch die Stufen 1–4 treffen. Die Korrektur ändert nur den Sortierschlüssel, die Signaturen bereits gespeicherter Combos bleiben gleich.</li>
+</ul>
+
+<h3 id="aide-benchmark">Benchmark</h3>
+<p><code>deepyugioh benchmark</code> vergleicht drei Varianten auf derselben festen Kartenmenge mit denselben Grenzen und demselben Budget. Jede Variante schreibt in eigene, frische Datenbanken: <em>baseline</em> (Stufen 1–4, also der bisherige Generator), <em>hybrid</em> (Stufe 7, Anteil 0,5) und <em>aide</em> (nur Stufen 5 und 6). Kartenmenge: zehn Archetypen (Junk, Synchron, Lightsworn, Six Samurai, Dragonmaid, Shaddoll, Traptrix, Ogdoadic, Mathmech, Salamangreat) plus 22 allgemeine Karten, zusammen 296 Karten. Grenzen: 1500 Knoten, 60 s, 2–5 Karten, Gegnerfelder empty und standard, 7 Prozesse, je 300 s Rechenzeit. Ergebnis vom 9. November 2026 (Standardeinstellung, also ohne Hilfskarten in AIDE-Aufbauten):</p>
+<div class="table-wrap"><table>
+  <tr><th>Kennzahl</th><th>baseline</th><th>hybrid</th><th>aide</th></tr>
+  <tr><td>Suchen in 300 s</td><td>707</td><td>788</td><td>657</td></tr>
+  <tr><td>einzigartige validierte Combos</td><td><b>2772</b></td><td>2484</td><td>1861</td></tr>
+  <tr><td>Combos pro CPU-Minute</td><td><b>78,0</b></td><td>71,1</td><td>53,6</td></tr>
+  <tr><td>Suchen mit mindestens einer Combo</td><td>49 %</td><td>54 %</td><td><b>76 %</b></td></tr>
+  <tr><td>unvollständige Suchen</td><td>44 %</td><td>26 %</td><td><b>19 %</b></td></tr>
+  <tr><td>Combos, die baseline nicht gefunden hat</td><td>–</td><td>1036</td><td><b>1851</b> (nur 10 gemeinsam)</td></tr>
+  <tr><td>Karten pro Combo (Mittel)</td><td>3,92</td><td>4,00</td><td>4,09</td></tr>
+  <tr><td>Anteil Combos mit 3+ Karten</td><td>93,5 %</td><td>92,4 %</td><td>90,5 %</td></tr>
+  <tr><td>Nutzenarten pro Combo (Mittel)</td><td>1,17</td><td>1,15</td><td>1,16</td></tr>
+  <tr><td>Anteil validiert</td><td>100 %</td><td>100 %</td><td>100 %</td></tr>
+  <tr><td>AIDE-Hypothesen</td><td>–</td><td>200 Pläne: 58 VALIDATED, 114 INVALID, 18 INCONCLUSIVE</td><td>339 Pläne: 100 VALIDATED, 197 INVALID, 37 INCONCLUSIVE</td></tr>
+  <tr><td>max. RAM</td><td>175 MB</td><td>176 MB</td><td>177 MB</td></tr>
+</table></div>
+<p>Ein zweiter Lauf mit Hilfskarten in den AIDE-Aufbauten (<code>aide_helpers = true</code>) ergab baseline 70,1, hybrid 60,1 und aide 49,9 Combos pro CPU-Minute. Die AIDE-Suchen wurden dort deutlich teurer (290 statt 657 Suchen in 300 s), deshalb sind Hilfskarten standardmäßig aus. Zwischen den beiden Läufen schwankte baseline um etwa 15 %, weil ein Zeitbudget je nach Last unterschiedlich viele Suchen erlaubt. Die Richtung war in beiden Läufen gleich. Beide Berichte liegen in <a href="benchmarks/2026-11-09-aide.md">benchmarks/2026-11-09-aide.md</a>.</p>
+<div class="warn">
+  <p><strong>Bewertung:</strong> Bei gleicher Rechenzeit findet AIDE heute <strong>nicht mehr</strong> Combos als die bisherige Suche: rund 31 % weniger pro CPU-Minute, im Hybrid rund 9 % weniger. AIDE findet aber fast ausschließlich <strong>andere</strong> Combos. Von 1861 Combos hat die bisherige Suche nur 10 ebenfalls gefunden. Die Trefferquote pro Suche ist deutlich höher, und die Suchen sind seltener unvollständig. AIDE erschließt also einen Teil des Suchraums, den die Stufen 1–4 erst sehr spät erreichen würden: Mehrkarten-Ketten, die sich nicht aus einem Paar ergeben. Die Qualität der einzelnen Combos ist gleichwertig, alle sind validiert, Kartenzahl und Nutzen sind vergleichbar.</p>
+  <p><strong>Entscheidung:</strong> AIDE bleibt optional, und die Standardsuche bleibt unverändert. Wer gezielt Mehrkarten-Ketten sucht oder die Stufen 1 und 2 schon abgearbeitet hat, nimmt Stufe 5, 6 oder 7 dazu.</p>
+</div>
+
+<h3 id="aide-grenzen">Grenzen und nächste Schritte</h3>
+<ul>
+  <li><strong>Beschwörungen aus dem Extra Deck</strong> (Synchro, Xyz, Link, Fusion) bildet der Planer noch nicht ab. Ketten über „Material geht ins Grab“ (etwa Sangan) plant er deshalb nicht. Die Engine findet sie trotzdem, wenn das passende Extra-Deck-Monster im Aufbau liegt. Das ist die wichtigste Erweiterung für die nächste Version.</li>
+  <li><strong>Bedingungen</strong> sind meist <code>UNKNOWN</code>. Pläne werden dadurch eher zu großzügig, viele landen als <code>INVALID</code>. Hilfreich wäre das <em>Engine-Probing</em>: jede Karte in Testsituationen aktivieren und beobachten, was passiert.</li>
+  <li><strong>Plan als Zugreihenfolge</strong>: Der Plan könnte der Suche sagen, welche Aktionen sie zuerst probieren soll. Dann wäre die erste Combo schneller gefunden, verworfen würde trotzdem nichts.</li>
+  <li><strong>Kopien</strong>: Pro Plan kommt jede Karte einmal vor (plus die zweite Kopie im Deck).</li>
+  <li><strong>Ziehen</strong> (Pot of Greed) ist zufällig und wird beim Planen nicht genutzt.</li>
+  <li>Der Benchmark nutzt eine Kartenmenge von rund 300 Karten. Auf dem vollen Pool ist das Verhältnis noch nicht gemessen.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="tests">12. Tests</h2>
 <p><code>uv run pytest</code> führt alle Tests aus, auch gegen die echte Engine. Fehlen Engine oder Kartendatenbank, werden die betroffenen Tests übersprungen.</p>
 <div class="table-wrap"><table>
   <tr><th>Datei</th><th>Prüft</th></tr>
@@ -588,11 +740,12 @@ gen.coverage()                                 # Abdeckung pro Stufe</code></pre
   <tr><td><code>test_actions.py</code></td><td>Aufzählung der Engine-Antworten, Kopien, Summenauswahl, Zonenregeln, Nutzenvergleich</td></tr>
   <tr><td><code>test_combo_search.py</code></td><td>Suche, Nutzen, Validierung an bekannten Combos</td></tr>
   <tr><td><code>test_generator.py</code></td><td>Modulschnittstelle, Startaufbauten, Speichern, fortsetzbare Läufe, TOML</td></tr>
+  <tr><td><code>test_aide.py</code></td><td>Lua-Leser, Effect Signatures an echten Skripten (Suche, Trigger, Kosten, Beschwörungsprozedur, ODER-Filter, Unbekanntes), Regelprüfung, Producer/Consumer-Index, Vorwärts- und Rückwärtsplaner, Statusmodell, Hybridstufe (Stufen 1–4 unverändert), Engine-Fix für Extra-Monsterzonen</td></tr>
   <tr><td><code>test_settings.py</code></td><td>dauerhafte Einstellungen, Testmodus-Sperre der GUI, Design, Kartensuche, Lauf-Auswertung, Stopp eines Laufs, Textaufbereitung der GUI</td></tr>
 </table></div>
 
 <!-- ============================================================ -->
-<h2 id="grenzen-offen">12. Bekannte Grenzen</h2>
+<h2 id="grenzen-offen">13. Bekannte Grenzen</h2>
 <ul>
   <li><strong>Einstellungen und Fortsetzen:</strong> Bereits erledigte Kandidaten werden nicht erneut durchsucht, auch wenn sich Grenzen oder Kandidaten-Einstellungen geändert haben (siehe <a href="#gui-lauf">Globaler Lauf</a>).</li>
   <li><strong>Neue Kartenskripte</strong> ändern die Graph-Version und damit die Kandidatenreihenfolge. Erledigte Kandidaten werden anhand ihrer ID trotzdem übersprungen; ein Modus „nur Kandidaten mit neuen Karten“ fehlt noch.</li>
@@ -601,10 +754,11 @@ gen.coverage()                                 # Abdeckung pro Stufe</code></pre
   <li><strong>Verzweigung per Replay</strong> kostet etwa 15 ms pro Alternative; schnelleres Verzweigen per <code>fork(2)</code> ist geplant.</li>
   <li><strong>Austauschbare Helfer:</strong> Combos mit einem Helfer-Vertreter werden noch nicht gegen alle Karten derselben Rolle validiert.</li>
   <li><strong>GUI-Schrift:</strong> ohne Kantenglättung, siehe <a href="#gui-technik">GUI-Technik</a>.</li>
+  <li><strong>AIDE:</strong> siehe <a href="#aide-grenzen">Grenzen und nächste Schritte</a>.</li>
 </ul>
 
 <!-- ============================================================ -->
-<h2 id="lizenz">13. Lizenz</h2>
+<h2 id="lizenz">14. Lizenz</h2>
 <p>ygopro-core und die CardScripts stehen unter der AGPL-3.0. Weil dieses Projekt die Engine einbindet, gilt die AGPL auch für das Gesamtsystem, sobald es weitergegeben oder als Netzwerkdienst betrieben wird. Yu-Gi-Oh! ist eine Marke von Shueisha und Konami; dieses Projekt ist damit nicht verbunden.</p>
 </main>
 </div>

@@ -32,6 +32,11 @@ uv run deepyugioh generate --tiers 1 2 --workers 8 --time-budget 3600
 uv run deepyugioh generate --tiers 1 2 3 --workers 8 --target 100 --benefit wins   # bis 100 neue Sieg-Combos
 uv run deepyugioh generate --config deepyugioh.example.toml
 
+# AIDE (optional): algorithmisch geplante Mehrkarten-Ketten, Stufen 5-7
+uv run deepyugioh aide plan --card "Junk Converter"        # Pläne einer Karte ansehen
+uv run deepyugioh generate --tiers 7 --time-budget 3600    # Hybrid: Stufen 1-4 im Wechsel mit AIDE
+uv run deepyugioh benchmark --budget 300s                  # bisherige Suche vs. AIDE vs. Hybrid
+
 # einen einzelnen Startaufbau durchsuchen
 uv run deepyugioh search \
     --hand "Junk Synchron" "Foolish Burial" \
@@ -89,7 +94,7 @@ Bedienung, alle Seiten und das Vorgehen beim Feintuning: [Softwaredokumentation,
 |---|---|
 | [src/deepyugioh/contracts/](src/deepyugioh/contracts/) | Verträge zwischen den Modulen: Datentypen und Schnittstellen |
 | [src/deepyugioh/cards/](src/deepyugioh/cards/) | Card Knowledge System: Import, Skriptanalyse, Interaktionsgraph (Schritte 1–3) |
-| [src/deepyugioh/generator/](src/deepyugioh/generator/) | Combo Generator: Startaufbauten, Suche, Validierung, Jobs (Schritte 4–5) |
+| [src/deepyugioh/generator/](src/deepyugioh/generator/) | Combo Generator: Startaufbauten, Suche, Validierung, Jobs (Schritte 4–5); [aide/](src/deepyugioh/generator/aide/) plant Mehrkarten-Ketten aus Effektbeschreibungen (Stufen 5–7, optional) |
 | [src/deepyugioh/engine/](src/deepyugioh/engine/) | ctypes-Anbindung an ygopro-core |
 | [src/deepyugioh/repository/](src/deepyugioh/repository/) | Database 1 – Combo Repository (Schritt 6) |
 | [src/deepyugioh/gui/](src/deepyugioh/gui/) | Test-GUI (nur im Testmodus) |
@@ -99,7 +104,10 @@ Bedienung, alle Seiten und das Vorgehen beim Feintuning: [Softwaredokumentation,
 Erzeugte Daten liegen in `data/` (nicht versioniert):
 - `cards.sqlite`: Karten und Graph,
 - `combos.sqlite`: Database 1,
-- `generator.sqlite`: Fortschritt der globalen Suche.
+- `generator.sqlite`: Fortschritt der globalen Suche,
+- `aide.sqlite`: Kandidaten-Pool von AIDE (Pläne mit Status).
+
+AIDE ist in der [Softwaredokumentation, Abschnitt 11](docs/software-dokumentation.html#aide) beschrieben, samt [Benchmark](docs/benchmarks/2026-11-09-aide.md). Bei gleicher Rechenzeit findet AIDE bisher weniger Combos als die Stufen 1–4, aber fast nur andere. Es bleibt deshalb optional, die Standardsuche ist unverändert.
 
 ## Lizenz
 

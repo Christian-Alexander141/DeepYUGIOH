@@ -31,7 +31,11 @@ TIERS = {
     2: "NAMED / RESTRICTED interactions (card or archetype named)",
     3: "CONSTRAINED interactions (generic with level/type/attribute filter)",
     4: "GENERIC interactions (targets anything)",
+    5: "AIDE forward planning: multi-card chains from every starter card",
+    6: "AIDE backward planning: chains that bring a card to where its effect works",
+    7: "HYBRID: tiers 1-4 interleaved with AIDE plans (share: aide_share)",
 }
+DEFAULT_TIERS = (1, 2, 3, 4)  # the AIDE tiers 5-7 are opt-in
 
 # Opponent boards are made of vanilla monsters and Normal Spells: they give our
 # effects something to target but can never be activated during our turn.
@@ -53,6 +57,12 @@ class CandidateConfig:
     max_deck_neighbors: int = 15   # cards added to the deck from the interaction neighbourhood
     max_extra: int = 15            # extra deck size (as in the real game)
     enablers: bool = True          # add generic helpers (e.g. Foolish Burial) when cards need them
+    # AIDE (tiers 5-7)
+    aide_share: float = 0.5        # tier 7: share of searches that go to AIDE plans
+    aide_plans_per_card: int = 6   # plans kept per start / goal card
+    aide_branching: int = 4        # cards tried per effect move while planning
+    aide_neighbors: int = 0        # extra deck-neighbourhood cards added to a plan's setup
+    aide_helpers: bool = False     # add the same generic helpers as tiers 1-4 (benchmark: slower, fewer combos)
 
 
 @dataclass(frozen=True)
@@ -129,6 +139,10 @@ class GeneratorConfig:
             errors.append(f"unknown opponent boards: {sorted(missing)}")
         if cand.max_deck_neighbors < 0 or cand.max_extra < 0:
             errors.append("candidates.max_deck_neighbors and max_extra must be >= 0")
+        if not 0.0 < cand.aide_share < 1.0:
+            errors.append("candidates.aide_share must be between 0 and 1")
+        if cand.aide_plans_per_card < 1 or cand.aide_branching < 1 or cand.aide_neighbors < 0:
+            errors.append("candidates.aide_plans_per_card and aide_branching must be >= 1, aide_neighbors >= 0")
         if self.workers < 1:
             errors.append("workers must be >= 1")
         if errors:

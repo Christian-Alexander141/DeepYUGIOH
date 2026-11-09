@@ -23,6 +23,12 @@ opponent_boards = ["empty", "standard"]
 max_deck_neighbors = 15
 max_extra = 15
 enablers = true
+# AIDE (algorithmic planning, tiers 5-7; add 5, 6 or 7 to `tiers` to use it)
+aide_share = 0.5            # tier 7: share of searches that go to AIDE plans
+aide_plans_per_card = 6     # plans kept per start / goal card
+aide_branching = 4          # cards tried per effect move while planning
+aide_neighbors = 0          # extra deck-neighbourhood cards in a plan's start setup
+aide_helpers = false        # add the generic helpers of tiers 1-4 (benchmark: slower)
 
 # Opponent boards: vanilla monsters and Normal Spells only - they must never
 # be able to act during our turn. Boards defined here replace/extend the defaults.

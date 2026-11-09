@@ -93,5 +93,14 @@ class JobStore:
     def errors(self, limit: int = 20) -> list[tuple[str, str]]:
         return self.db.execute("SELECT candidate, error FROM jobs WHERE status = 'error' LIMIT ?", (limit,)).fetchall()
 
+    def jobs_for(self, candidates: list[str]) -> dict[str, tuple[str, int | None]]:
+        """{candidate id: (status, run id)} for the candidates that were processed."""
+        out = {}
+        for i in range(0, len(candidates), 500):
+            chunk = candidates[i:i + 500]
+            q = f"SELECT candidate, status, run_id FROM jobs WHERE candidate IN ({','.join('?' * len(chunk))})"
+            out.update({c: (st, r) for c, st, r in self.db.execute(q, chunk)})
+        return out
+
     def close(self):
         self.db.close()

@@ -261,5 +261,16 @@ class ComboRepository:
             )},
         }
 
+    def cards_for_runs(self, run_ids: list[int]) -> dict[int, list[tuple[int, ...]]]:
+        """{run id: [required cards of each combo linked to the run]}"""
+        out: dict[int, list[tuple[int, ...]]] = {}
+        for i in range(0, len(run_ids), 500):
+            chunk = run_ids[i:i + 500]
+            q = (f"SELECT cr.run_id, c.cards FROM combo_runs cr JOIN combos c ON c.id = cr.combo_id"
+                 f" WHERE cr.run_id IN ({','.join('?' * len(chunk))})")
+            for rid, cards in self.db.execute(q, chunk):
+                out.setdefault(rid, []).append(tuple(json.loads(cards)))
+        return out
+
     def close(self):
         self.db.close()
