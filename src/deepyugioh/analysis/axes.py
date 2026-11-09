@@ -42,7 +42,7 @@ class OutcomeAnalyzer:
     """Ergebnis: what the end board does for us and against the opponent."""
 
     name = "outcome"
-    version = "1"
+    version = "2"   # 2: raw opp_losses (what the opponent loses, for "Durchbrechen")
     global_ = False
     # value = sum(weight * raw[key]) - documented, part of the version
     WEIGHTS = {"wins": 100.0, "negates": 4.0, "disruptions": 3.0, "unclear_disruptions": 1.0, "opp_field_loss": 2.0,
@@ -136,6 +136,8 @@ class OutcomeAnalyzer:
             "opp_lp_loss": b.get("opp_lp_loss", 0),
             "wins": bool(b.get("wins", False)),
         }
+        raw["opp_losses"] = round(raw["opp_field_loss"] + raw["opp_hand_loss"] + raw["opp_lp_loss"] / 1000
+                                  + (10 if raw["wins"] else 0), 3)
         terms = dict(raw, opp_lp_loss_k=raw["opp_lp_loss"] / 1000, atk_total_k=raw["atk_total"] / 1000,
                      disruptions=raw["disruptions"] - negates, wins=1.0 if raw["wins"] else 0.0)
         value = sum(w * float(terms[k]) for k, w in self.WEIGHTS.items())

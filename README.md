@@ -39,7 +39,8 @@ uv run deepyugioh benchmark --budget 300s                  # bisherige Suche vs.
 
 # Stufe 2: Combos bewerten (Database 2), inkrementell
 uv run deepyugioh analyze
-uv run deepyugioh analysis top --axis outcome --limit 10
+uv run deepyugioh analysis top --axis strength --limit 10     # oder opening, breaking, outcome ...
+uv run deepyugioh analysis weights                            # Gewichte der Gesamtwerte
 uv run deepyugioh analysis fit --race Dragon --archetype Blue-Eyes   # Passung zu einem Deckprofil
 
 # einen einzelnen Startaufbau durchsuchen

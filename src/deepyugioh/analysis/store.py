@@ -105,6 +105,12 @@ class AnalysisRepository:
                 [(s, a, v, json.dumps(r, sort_keys=True), val, e, analysis_id) for s, a, v, r, val, e in rows],
             )
 
+    def replace_axis(self, axis: str, rows: Iterable[tuple], analysis_id: int):
+        """Replace every result of one (derived) axis; rows as for write()."""
+        with self.db:
+            self.db.execute("DELETE FROM combo_axes WHERE axis=?", (axis,))
+        self.write(rows, analysis_id)
+
     def write_profiles(self, rows: Iterable[tuple]):
         """rows: (signature, card_count, hand, family, data)."""
         with self.db:

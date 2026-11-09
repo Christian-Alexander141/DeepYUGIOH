@@ -303,6 +303,7 @@ def cmd_analyze(args) -> int:
     report = system.run(full=args.full, progress=lambda i, n: print(f"  {i}/{n} combos", flush=True))
     dt = __import__("time").perf_counter() - t0
     print(f"{report.combos} combos in {dt:.0f}s: written {report.written}, up to date {report.skipped}")
+    _rescore(analysis)
     for e in report.errors[:10]:
         print(f"  error: {e}")
     if len(report.errors) > 10:
@@ -310,10 +311,20 @@ def cmd_analyze(args) -> int:
     return 0
 
 
+def _rescore(analysis):
+    from deepyugioh import settings
+    from deepyugioh.analysis import Rescorer
+
+    for name, info in Rescorer(analysis, settings.analysis_scorings()).run().items():
+        missing = f" (without {', '.join(info['missing'])} - not analysed yet)" if info["missing"] else ""
+        print(f"scoring {name} {info['version']}: {info['combos']} combos{missing}")
+
+
 def _print_profile(store, combo, prof):
     names = ", ".join(store.name(c) for c in combo.cards) if combo else "?"
     print(f"\n{names}" + (f"  [#{combo.id}, {combo.card_count} cards]" if combo else ""))
-    for axis in ("outcome", "cost", "consistency", "genericness"):
+    for axis in ("strength", "opening", "breaking", "outcome", "cost", "consistency", "genericness",
+                 *sorted(set(prof) - {"strength", "opening", "breaking", "outcome", "cost", "consistency", "genericness"})):
         if axis in prof:
             a = prof[axis]
             score = "-" if a.score is None else f"{a.score:5.1f}"
@@ -345,6 +356,21 @@ def cmd_analysis(args) -> int:
         for sig, _ in analysis.top(args.axis, limit=args.limit):
             cid = by_sig(sig)
             _print_profile(store, combos.get(cid) if cid else None, analysis.profile(sig))
+        return 0
+    if args.action == "rescore":
+        _rescore(analysis)
+        return 0
+    if args.action == "weights":
+        from deepyugioh import settings
+        from deepyugioh.analysis.strength import component_label
+
+        for sc in settings.analysis_scorings():
+            print(f"{sc.name} - {sc.label} ({sc.version})")
+            total = sum(sc.weights.values())
+            for comp, w in sorted(sc.weights.items(), key=lambda kv: -kv[1]):
+                print(f"   {w / total:5.1%}  {comp:<28} {component_label(comp)}")
+        print(f"\nchange them in {settings.settings_path()} under [analysis.scoring.NAME.weights], "
+              "then `deepyugioh analysis rescore`")
         return 0
     if args.action == "card":
         if not args.card:
@@ -509,13 +535,14 @@ def main(argv: list[str] | None = None) -> int:
     an.set_defaults(fn=cmd_analyze)
 
     ar = sub.add_parser("analysis", help="read Database 2: stats, the profile of one combo, best combos of an axis")
-    ar.add_argument("action", choices=["stats", "show", "top", "card", "fit"])
+    ar.add_argument("action", choices=["stats", "show", "top", "card", "fit", "rescore", "weights"])
     ar.add_argument("--combo", type=int, help="show: combo id in Database 1")
     ar.add_argument("--card", help="card: card name or code")
     ar.add_argument("--archetype", nargs="+", help="fit: deck archetypes, e.g. Blue-Eyes")
     ar.add_argument("--race", nargs="+", help="fit: monster types, e.g. Dragon")
     ar.add_argument("--attribute", nargs="+", help="fit: attributes, e.g. LIGHT")
-    ar.add_argument("--axis", default="outcome", choices=["outcome", "cost", "consistency", "genericness"])
+    ar.add_argument("--axis", default="strength",
+                    help="top: outcome, cost, consistency, genericness, strength, opening, breaking or an own scoring")
     ar.add_argument("--limit", type=int, default=10)
     ar.set_defaults(fn=cmd_analysis)
 

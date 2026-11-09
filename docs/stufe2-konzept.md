@@ -1,6 +1,6 @@
 # Stufe 2: Analyzer System, Database 2 und Qualitätsfilter
 
-Stand: 9. November 2026 · Status: Schritte 2.1 bis 2.3 umgesetzt (siehe Abschnitte 13 und 14), der Rest ist Konzept
+Stand: 9. November 2026 · Status: Schritte 2.1 bis 2.4 umgesetzt (siehe Abschnitte 13 bis 15), der Rest ist Konzept
 
 Stufe 2 bewertet die Combos, die Phase 1 in Database 1 gefunden hat: wie stark sie sind, in welcher Situation, und wie gut sie zu anderen Combos und Decks passen. Sie macht das für den Deckbauer sichtbar und filterbar. Grundsatz aus dem [Gesamtkonzept](konzept.md):
 
@@ -133,7 +133,7 @@ Combos werden über ihre `signature` angesprochen, nicht über die interne ID vo
 | 2.1 ✓ | Grundgerüst: Database 2, Analyzer-Vertrag, inkrementeller und versionierter Lauf über Database 1, CLI `deepyugioh analyze` |
 | 2.2 ✓ | Rechnerische Achsen: Ergebnis (Endfeld mit Störungen aus den Effect Signatures), Einsatz, Konsistenz mit Familien |
 | 2.3 ✓ | Deckspezifität: Sperren in den Effect Signatures, Anforderungsprofil, Generizität pro Karte und Combo, Passung zu Deckprofilen |
-| 2.4 | Normierung, allgemeine Spielstärke und Situationswerte mit Standardgewichten (`[analysis.weights]`) |
+| 2.4 ✓ | Normierung, allgemeine Spielstärke und Situationswerte mit Standardgewichten (`[analysis.weights]`) |
 | 2.5 | Kompatibilitätskanten zwischen Combos |
 | 2.6 | Qualitätsfilter: Profile, gespeicherte Ergebnisse, Dominanzfilter, Export |
 | 2.7 | Test-GUI für Stufe 2 nach dem Vorbild der GUI von Phase 1: Bewertungsprofile, Gewichte änderbar, Filterprofile, Deckprofil-Passung |
@@ -234,3 +234,47 @@ Ein Deckprofil besteht aus Archetypen, Typen und Attributen (`DeckProfile`). Die
 - mal einen Faktor für jede sichere Sperre: 1, wenn das Profil selbst erlaubt ist (z. B. „nur Drachen“ in einem Drachendeck), sonst der Anteil, den die Sperre erlaubt.
 
 So hat eine Dragonmaid-Combo eine Generizität von 38 und im Profil „Drache, Blue-Eyes“ eine Passung von 100. Eine generische Combo aus Zaubern passt überall mit 100. Die Faktoren 0,5 und 0,6 sind Startwerte und werden wie die Gewichte später am Simulator kalibriert. Die Passung wird bei Bedarf berechnet (`analysis fit`). Gespeicherte Filterprofile folgen in Schritt 2.6.
+
+## 15. Umsetzungsstand (Schritt 2.4: Spielstärke und Situationen)
+
+### Benutzung
+
+```bash
+uv run deepyugioh analyze                       # analysiert und berechnet danach alle Gesamtwerte neu
+uv run deepyugioh analysis weights              # aktuelle Gewichte
+uv run deepyugioh analysis rescore              # nach einer Änderung der Gewichte (Sekunden, keine neue Analyse)
+uv run deepyugioh analysis top --axis strength  # oder opening, breaking
+```
+
+### Bewertungen (`analysis/strength.py`)
+
+Eine *Bewertung* ist eine benannte Gewichtung von Bestandteilen. Ein Bestandteil ist entweder der Wert 0–100 einer Achse (`outcome`) oder ein Rohwert einer Achse (`outcome.disruptions`). Rohwerte werden dafür als Perzentil über alle Combos normiert, wobei der kleinste Wert 0 bekommt: Keine Störung ist für den Spielbeginn nichts wert und nicht der Median. Das Ergebnis ist der gewichtete Mittelwert und wird als eigene Achse in Database 2 gespeichert, mit Bestandteilen, Gewichten und fehlenden Bestandteilen in den Rohwerten und einem Hash der Gewichte als Version. Der Wert 0–100 dieser Achse ist wieder das Perzentil.
+
+| Bewertung | Standardgewichte |
+|---|---|
+| `strength`: Allgemeine Spielstärke | Ergebnis 45 %, Konsistenz 25 %, Einsatz 15 %, Robustheit 15 % |
+| `opening`: Spielbeginn (als Erster) | Störungen 35 %, Konsistenz als Erster 25 %, Ergebnis 20 %, Einsatz 10 %, Robustheit 10 % |
+| `breaking`: Durchbrechen (als Zweiter) | Verluste des Gegners 45 %, Konsistenz als Zweiter 25 %, Einsatz 15 %, Ergebnis 15 % |
+
+„Verluste des Gegners“ ist der neue Rohwert `outcome.opp_losses` (Ergebnis Version 2): verlorene Feld- und Handkarten des Gegners, Schaden/1000 und 10 für einen Sieg.
+
+**Robustheit fehlt bis Schritt 2.8.** Bis dahin wird sie ausgelassen, die übrigen Gewichte werden hochgerechnet, und Begründung und Rohwerte sagen „vorläufig, ohne Robustheit“. Sobald die Achse existiert, fließt sie ohne weitere Änderung ein. Die Situation „späteres Spiel“ folgt mit den neuen Startaufbauten aus Schritt 2.9.
+
+### Gewichte ändern
+
+Die Gewichte stehen in `deepyugioh.toml` und werden beim Lesen geprüft (bekannte Achsen, keine negativen Gewichte, mindestens eins positiv). Gewichte müssen sich nicht zu 1 summieren, sie werden normiert. Eigene Bewertungen kommen als neuer Name hinzu:
+
+```toml
+[analysis.scoring.strength.weights]
+outcome = 0.5
+consistency = 0.3
+cost = 0.2
+
+[analysis.scoring.grind]
+label = "Ressourcen (Test)"
+[analysis.scoring.grind.weights]
+"outcome.card_advantage" = 0.6
+consistency = 0.4
+```
+
+`settings.set_analysis_weights(name, weights)` und `settings.reset_analysis_weights(name)` sind die Schnittstelle für die Test-GUI in Schritt 2.7.

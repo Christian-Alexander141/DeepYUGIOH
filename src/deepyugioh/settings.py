@@ -137,6 +137,32 @@ def deck_model(path: Path | None = None):
     return model
 
 
+def analysis_scorings(path: Path | None = None):
+    """Overall strength and situations ([analysis.scoring.NAME] label + weights), defaults merged in."""
+    from deepyugioh.analysis.strength import scorings_from_dict
+
+    return scorings_from_dict(load(path).get("analysis", {}).get("scoring", {}))
+
+
+def set_analysis_weights(name: str, weights: dict[str, float], path: Path | None = None) -> Path:
+    """Store the weights of one scoring (validated first); other settings are kept."""
+    from deepyugioh.analysis.strength import scorings_from_dict
+
+    data = load(path)
+    scoring = data.setdefault("analysis", {}).setdefault("scoring", {})
+    scoring.setdefault(name, {})["weights"] = {k: float(v) for k, v in weights.items()}
+    scorings_from_dict(scoring)
+    return save(data, path)
+
+
+def reset_analysis_weights(name: str | None = None, path: Path | None = None) -> Path:
+    data = load(path)
+    scoring = data.get("analysis", {}).get("scoring", {})
+    for key in [name] if name else list(scoring):
+        scoring.pop(key, None)
+    return save(data, path)
+
+
 def generator_config(path: Path | None = None) -> "GeneratorConfig":
     """The persistent generator configuration (defaults for every missing key)."""
     from deepyugioh.generator.config import GeneratorConfig
