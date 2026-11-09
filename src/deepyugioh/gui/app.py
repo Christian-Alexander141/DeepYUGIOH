@@ -968,24 +968,46 @@ class GlobalTab:
         self.t0 = 0.0
         self.run_max_jobs: int | None = None
         self.run_budget: float | None = None
+        self.run_target: int | None = None
+        self.run_benefit: str | None = None
         self._indeterminate = False
 
-        opts = card(self.frame, "Laufoptionen", "ein Lauf setzt immer am gespeicherten Stand fort")
+        opts = card(self.frame, "Laufoptionen", "ein Lauf setzt immer am gespeicherten Stand fort; "
+                                                "die Optionen werden beim Start gespeichert")
         opts.pack(fill="x")
-        row = opts.body
+        row = ttk.Frame(opts.body)
+        row.pack(fill="x")
         ttk.Label(row, text="Stufen").pack(side="left")
         self.tier_vars = {t: tk.BooleanVar() for t in TIERS}
         for t, v in self.tier_vars.items():
             ttk.Checkbutton(row, text=str(t), variable=v).pack(side="left", padx=(8, 0))
-        ttk.Label(row, text="Max. Suchen").pack(side="left", padx=(24, 6))
-        self.max_jobs = tk.StringVar(value="100")
-        ttk.Entry(row, textvariable=self.max_jobs, width=9).pack(side="left")
-        ttk.Label(row, text="Zeitbudget (s)").pack(side="left", padx=(18, 6))
-        self.time_budget = tk.StringVar(value="")
-        ttk.Entry(row, textvariable=self.time_budget, width=9).pack(side="left")
-        ttk.Label(row, text="leer = unbegrenzt", style="Muted.TLabel").pack(side="left", padx=8)
-        for v in (*self.tier_vars.values(), self.max_jobs, self.time_budget):
+
+        saved = settings.run_options()
+        ttk.Label(row, text="Lauf endet bei").pack(side="left", padx=(24, 6))
+        self.mode = tk.StringVar(value=fmt.RUN_MODE_LABELS[saved["mode"]])
+        ttk.Combobox(row, textvariable=self.mode, values=list(fmt.RUN_MODE_LABELS.values()), state="readonly",
+                     width=24).pack(side="left")
+        self.target = tk.StringVar(value=str(saved["target"]))
+        self.benefit = tk.StringVar(value=fmt.TARGET_BENEFIT_LABELS.get(saved["benefit"], fmt.TARGET_BENEFIT_LABELS[""]))
+        self.max_jobs = tk.StringVar(value=str(saved["max_jobs"]))
+        self.time_budget = tk.StringVar(value=f"{saved['time_budget']:g}")
+        end = ttk.Frame(row)
+        end.pack(side="left", padx=(10, 0))
+        self._end_widgets = {
+            "target": [ttk.Entry(end, textvariable=self.target, width=7),
+                       ttk.Label(end, text="neue Combos, zählen:"),
+                       ttk.Combobox(end, textvariable=self.benefit, values=list(fmt.TARGET_BENEFIT_LABELS.values()),
+                                    state="readonly", width=26)],
+            "max_jobs": [ttk.Entry(end, textvariable=self.max_jobs, width=9), ttk.Label(end, text="Suchen")],
+            "time_budget": [ttk.Entry(end, textvariable=self.time_budget, width=9), ttk.Label(end, text="Sekunden")],
+            "unlimited": [],
+        }
+        self.end_hint = ttk.Label(opts.body, style="Muted.TLabel", justify="left")
+        self.end_hint.pack(fill="x", pady=(10, 0))
+        self.end_hint.bind("<Configure>", lambda e: self.end_hint.configure(wraplength=max(200, e.width)))
+        for v in (*self.tier_vars.values(), self.target, self.benefit, self.max_jobs, self.time_budget):
             v.trace_add("write", lambda *_: self.app.header.refresh())
+        self.mode.trace_add("write", lambda *_: self._show_end())
         self.stop_btn = ttk.Button(row, text="Stoppen", style="Danger.TButton", command=self.stop, state="disabled")
         self.stop_btn.pack(side="right")
         self.start_btn = ttk.Button(row, text="Lauf starten", style="Accent.TButton", command=self.start)
@@ -995,7 +1017,8 @@ class GlobalTab:
         live.pack(fill="x", pady=(16, 0))
         tiles, self.tiles = tile_row(live.body, [
             ("jobs", "Suchen"), ("complete", "vollständig"), ("incomplete", "unvollständig"), ("error", "Fehler"),
-            ("found", "Combos gefunden"), ("new", "neu in Database 1"), ("rate", "Suchen pro Minute"), ("time", "Laufzeit"),
+            ("found", "Combos"), ("new", "neu in DB 1"), ("target", "Ziel"), ("rate", "Suchen/Min."),
+            ("time", "Laufzeit"),
         ])
         tiles.pack(fill="x")
         self.bar = ttk.Progressbar(live.body, mode="determinate", maximum=100)
@@ -1024,24 +1047,87 @@ class GlobalTab:
         self.log.configure(state="disabled")
         app.busy_listeners.append(self._busy)
         self.config_changed()
+        self._show_end()
+
+    # ---- end condition -------------------------------------------------------------------
+    END_HINTS = {
+        "target": "Kein Zeitlimit für den Lauf: er sucht, bis so viele neue Combos in Database 1 stehen. Er endet "
+                  "vorher nur, wenn alle Kandidaten der gewählten Stufen bearbeitet sind oder du stoppst. "
+                  "Die Grenzen pro Suche (Zeitlimit, Knoten) gelten weiter.",
+        "max_jobs": "Endet nach dieser Anzahl Suchen (Startaufbauten).",
+        "time_budget": "Nach Ablauf starten keine neuen Suchen mehr, laufende werden fertig.",
+        "unlimited": "Läuft, bis alle Kandidaten der gewählten Stufen bearbeitet sind oder du stoppst.",
+    }
+
+    def mode_key(self) -> str:
+        return next(k for k, label in fmt.RUN_MODE_LABELS.items() if label == self.mode.get())
+
+    def benefit_key(self) -> str:
+        return next((k for k, label in fmt.TARGET_BENEFIT_LABELS.items() if label == self.benefit.get()), "")
+
+    def _show_end(self):
+        mode = self.mode_key()
+        for widgets in self._end_widgets.values():
+            for w in widgets:
+                w.pack_forget()
+        for i, w in enumerate(self._end_widgets[mode]):
+            w.pack(side="left", padx=(0 if i == 0 else 6, 0))
+        self.end_hint.configure(text=self.END_HINTS[mode])
+        self.app.header.refresh()
+
+    def end_condition(self) -> dict:
+        """The end condition in the form as run() arguments. Raises ValueError."""
+        mode = self.mode_key()
+        out = {"max_jobs": None, "time_budget": None, "target_combos": None, "target_benefit": None}
+        if mode == "target":
+            out["target_combos"] = _parse_number(self.target.get(), int, "Ziel-Combos", 1, 10**9)
+            out["target_benefit"] = self.benefit_key() or None
+        elif mode == "max_jobs":
+            out["max_jobs"] = _parse_number(self.max_jobs.get(), int, "Anzahl Suchen", 1, 10**12)
+        elif mode == "time_budget":
+            out["time_budget"] = _parse_number(self.time_budget.get(), float, "Zeitbudget", 1, 10**9)
+        return out
+
+    def _save_end(self, end: dict):
+        mode = self.mode_key()
+        values = {"mode": mode}
+        if mode == "target":
+            values.update(target=end["target_combos"], benefit=end["target_benefit"] or "")
+        elif mode == "max_jobs":
+            values["max_jobs"] = end["max_jobs"]
+        elif mode == "time_budget":
+            values["time_budget"] = end["time_budget"]
+        try:
+            settings.set_run_options(values)
+        except (OSError, ValueError) as e:  # never block a run because the file is not writable
+            self._append(f"Laufoptionen nicht gespeichert: {e}", "warn")
 
     # ---- state shown in the header -------------------------------------------------------
     @staticmethod
     def _empty_stats() -> dict:
-        return {"jobs": 0, "complete": 0, "incomplete": 0, "error": 0, "found": 0, "new": 0}
+        return {"jobs": 0, "complete": 0, "incomplete": 0, "error": 0, "found": 0, "new": 0, "hits": 0}
 
     def options_text(self) -> str:
         tiers = [str(t) for t, v in self.tier_vars.items() if v.get()]
-        jobs = self.max_jobs.get().strip() or "unbegrenzt"
-        budget = f"{self.time_budget.get().strip()}s" if self.time_budget.get().strip() else "unbegrenzt"
-        return f"Stufen {', '.join(tiers) or '-'}  |  max. {jobs} Suchen  |  Zeitbudget {budget}"
+        mode = self.mode_key()
+        if mode == "target":
+            benefit = self.benefit_key()
+            end = f"Ziel {self.target.get().strip() or '?'} neue Combos" + (f" ({fmt.TARGET_BENEFIT_LABELS[benefit]})" if benefit else "")
+        elif mode == "max_jobs":
+            end = f"max. {self.max_jobs.get().strip() or '?'} Suchen"
+        elif mode == "time_budget":
+            end = f"Zeitbudget {self.time_budget.get().strip() or '?'}s"
+        else:
+            end = "bis alle Kandidaten bearbeitet sind"
+        return f"Stufen {', '.join(tiers) or '-'}  |  {end}"
 
     def metrics_text(self) -> str:
         if not self.running and self.last_report is None:
             return ""
         s = self.stats
         elapsed = (time.perf_counter() - self.t0) if self.running else self.last_report.elapsed_s
-        return f"{s['jobs']} Suchen  |  {s['new']} neue Combos  |  {_duration(elapsed)}"
+        goal = f"Ziel {s['hits']}/{self.run_target}  |  " if self.run_target else ""
+        return f"{goal}{s['jobs']} Suchen  |  {s['new']} neue Combos  |  {_duration(elapsed)}"
 
     def config_changed(self):
         for t, v in self.tier_vars.items():
@@ -1075,6 +1161,11 @@ class GlobalTab:
         t["error"].set(s["error"], "danger" if s["error"] else None)
         t["found"].set(s["found"])
         t["new"].set(s["new"], "accent" if s["new"] else None)
+        if self.run_target:
+            t["target"].set(f"{s['hits']}/{self.run_target}",
+                            "success" if s["hits"] >= self.run_target else "accent" if s["hits"] else None)
+        else:
+            t["target"].set("-")
         t["rate"].set(f"{s['jobs'] / elapsed * 60:.1f}" if elapsed > 1 else "-")
         t["time"].set(_duration(elapsed))
 
@@ -1082,7 +1173,9 @@ class GlobalTab:
         bars = (self.bar, self.app.header.bar)
         if self.running:
             frac = None
-            if self.run_max_jobs:
+            if self.run_target:
+                frac = self.stats["hits"] / self.run_target
+            elif self.run_max_jobs:
                 frac = self.stats["jobs"] / self.run_max_jobs
             elif self.run_budget:
                 frac = (time.perf_counter() - self.t0) / self.run_budget
@@ -1149,8 +1242,7 @@ class GlobalTab:
         try:
             if not tiers:
                 raise ValueError("Mindestens eine Stufe auswählen (Seite Globaler Lauf).")
-            max_jobs = _optional(self.max_jobs.get(), int, "Max. Suchen")
-            budget = _optional(self.time_budget.get(), float, "Zeitbudget")
+            end = self.end_condition()
         except ValueError as e:
             messagebox.showerror("Globaler Lauf", str(e))
             self.app.show("global")
@@ -1160,23 +1252,34 @@ class GlobalTab:
 
         def work():
             gen = self._generator(cfg)
-            return gen.run(tiers=tiers, max_jobs=max_jobs, time_budget=budget,
-                           progress=_Listener(self.app, self._job), should_stop=stop.is_set)
+            return gen.run(tiers=tiers, progress=_Listener(self.app, self._job), should_stop=stop.is_set, **end)
 
         # state first: task() notifies the busy listeners, which read it
-        prev = (self.stop_event, self.running, self.stats, self.last_report)
+        prev = (self.stop_event, self.running, self.stats, self.last_report, self.run_target)
         self.stop_event, self.running = stop, True
         self.stats, self.last_report = self._empty_stats(), None
-        self.t0, self.run_max_jobs, self.run_budget = time.perf_counter(), max_jobs, budget
+        self.t0, self.run_max_jobs, self.run_budget = time.perf_counter(), end["max_jobs"], end["time_budget"]
+        self.run_target, self.run_benefit = end["target_combos"], end["target_benefit"]
         if not self.app.task("Globaler Lauf", work, self._done):
-            self.stop_event, self.running, self.stats, self.last_report = prev
+            self.stop_event, self.running, self.stats, self.last_report, self.run_target = prev
             return
-        self._append(f"Start {time.strftime('%H:%M:%S')}: Stufen {tiers}, max. {max_jobs or 'unbegrenzt'} Suchen, "
-                     f"Budget {f'{budget:g}s' if budget else 'unbegrenzt'}, {cfg.workers} Prozess(e); "
+        self._save_end(end)
+        self._append(f"Start {time.strftime('%H:%M:%S')}: Stufen {tiers}, Ende bei {self._end_text(end)}, "
+                     f"{cfg.workers} Prozess(e); "
                      f"Karten {lim.min_cards}-{lim.max_cards}, Knoten {lim.max_nodes}, Zeitlimit {lim.time_limit:g}s, "
                      f"Gegner {', '.join(cfg.candidates.opponent_boards)}", "h")
         self._busy()
         self._tick()
+
+    @staticmethod
+    def _end_text(end: dict) -> str:
+        if end["target_combos"]:
+            return fmt.target_text(end["target_combos"], end["target_benefit"] or "")
+        if end["max_jobs"]:
+            return f"{end['max_jobs']} Suchen"
+        if end["time_budget"]:
+            return f"Zeitbudget {end['time_budget']:g}s"
+        return "allen Kandidaten"
 
     def stop(self):
         if self.stop_event is not None and not self.stop_event.is_set():
@@ -1190,21 +1293,33 @@ class GlobalTab:
         s[job.status] += 1
         s["found"] += job.combos_found
         s["new"] += job.combos_new
+        s["hits"] += job.target_hits
         self._show_stats()
         self._update_progress()
         self.app.header.refresh()
         if job.status == "error" or job.combos_new or s["jobs"] % 25 == 0:
             extra = f"  FEHLER {job.error}" if job.error else ""
             tag = "err" if job.status == "error" else "ok" if job.combos_new else None
+            goal = f"  Ziel {s['hits']}/{self.run_target}" if self.run_target else ""
             self._append(f"[Stufe {job.tier} #{job.position}] {job.status:<10} {job.elapsed_s:6.1f}s  "
-                         f"Combos {job.combos_found} (neu {job.combos_new})  Lauf #{job.run_id}{extra}", tag)
+                         f"Combos {job.combos_found} (neu {job.combos_new}){goal}  Lauf #{job.run_id}{extra}", tag)
 
     def _done(self, report):
         self.last_report = report
         self.running = False
-        self._append(f"Ende: {report.jobs} Suchen in {report.elapsed_s:.0f}s - {report.complete} vollständig, "
-                     f"{report.incomplete} unvollständig, {report.errors} Fehler, {report.skipped} übersprungen; "
-                     f"{report.combos_found} Combos, {report.combos_new} neu in Database 1", "h")
+        reason = fmt.STOP_REASONS.get(report.stop_reason, report.stop_reason)
+        self._append(f"Ende ({reason}): {report.jobs} Suchen in {_duration(report.elapsed_s)} - "
+                     f"{report.complete} vollständig, {report.incomplete} unvollständig, {report.errors} Fehler, "
+                     f"{report.skipped} übersprungen; {report.combos_found} Combos, {report.combos_new} neu in Database 1",
+                     "h")
+        if self.run_target:
+            goal = fmt.target_text(self.run_target, self.run_benefit or "")
+            if report.target_reached:
+                self._append(f"Ziel erreicht: {report.target_hits} von {goal}", "ok")
+            else:
+                hint = (" Weitere Stufen auswählen oder die Grenzen pro Suche erhöhen (wirkt nur auf noch nicht "
+                        "bearbeitete Kandidaten)." if report.stop_reason == "exhausted" else "")
+                self._append(f"Ziel nicht erreicht: {report.target_hits} von {goal}.{hint}", "warn")
         self._show_stats()
         self._update_progress()
         self.refresh_coverage()

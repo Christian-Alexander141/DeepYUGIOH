@@ -48,6 +48,7 @@ class JobReport:
     elapsed_s: float
     run_id: int | None = None
     error: str | None = None
+    target_hits: int = 0   # new combos that count towards the run target (see ComboGenerator.run)
 
 
 class JobStore:

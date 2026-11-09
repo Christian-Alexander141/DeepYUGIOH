@@ -103,11 +103,17 @@ class _Printer:
 
 def cmd_generate(args) -> int:
     gen = _generator(args, _config(args))
+    if args.benefit and args.target is None:
+        raise ValueError("--benefit only applies together with --target")
     report = gen.run(tiers=args.tiers, max_jobs=args.max_jobs, time_budget=args.time_budget,
-                     progress=_Printer(args.report_every))
+                     progress=_Printer(args.report_every), target_combos=args.target, target_benefit=args.benefit)
     print(f"\n{report.jobs} jobs in {report.elapsed_s:.0f}s: {report.complete} complete, "
           f"{report.incomplete} incomplete, {report.errors} errors, {report.skipped} already done; "
           f"{report.combos_found} combos found, {report.combos_new} new in Database 1")
+    if args.target is not None:
+        what = f"new combos with {args.benefit}" if args.benefit else "new combos"
+        state = "reached" if report.target_reached else f"not reached ({report.stop_reason})"
+        print(f"target: {report.target_hits}/{args.target} {what} - {state}")
     return 0
 
 
@@ -199,6 +205,8 @@ def cmd_gui(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from deepyugioh.contracts.combos import BENEFIT_CRITERIA  # light: no engine import
+
     p = argparse.ArgumentParser(prog="deepyugioh")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -222,6 +230,10 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--tiers", type=int, nargs="+", help="tiers to process (default: config)")
     g.add_argument("--max-jobs", type=int, help="stop after this many searches")
     g.add_argument("--time-budget", type=float, help="stop starting new searches after this many seconds")
+    g.add_argument("--target", type=int, metavar="N",
+                   help="stop once N new combos are in Database 1, however long it takes")
+    g.add_argument("--benefit", choices=(*BENEFIT_CRITERIA, "wins"),
+                   help="with --target: only count combos with this benefit, e.g. wins")
     g.add_argument("--workers", type=int, help="parallel worker processes")
     g.add_argument("--report-every", type=int, default=50)
     g.set_defaults(fn=cmd_generate)

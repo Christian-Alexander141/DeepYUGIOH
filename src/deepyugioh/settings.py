@@ -85,6 +85,40 @@ def set_gui_theme(theme: str, path: Path | None = None) -> Path:
     return save(data, path)
 
 
+RUN_MODES = ("target", "max_jobs", "time_budget", "unlimited")
+RUN_DEFAULTS = {"mode": "target", "target": 100, "benefit": "", "max_jobs": 100, "time_budget": 3600.0}
+
+
+def run_options(path: Path | None = None) -> dict:
+    """End condition of a global run in the test GUI ([gui.run]); defaults for missing or broken keys.
+
+    mode: target (N new combos, optionally only those with `benefit`), max_jobs,
+    time_budget (seconds) or unlimited (until every candidate is processed)."""
+    stored = load(path).get("gui", {}).get("run", {})
+    out = dict(RUN_DEFAULTS)
+    for key, default in RUN_DEFAULTS.items():
+        value = stored.get(key, default)
+        if isinstance(default, str) and isinstance(value, str):
+            out[key] = value
+        elif not isinstance(default, str) and isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            out[key] = type(default)(value)
+    if out["mode"] not in RUN_MODES:
+        out["mode"] = RUN_DEFAULTS["mode"]
+    return out
+
+
+def set_run_options(options: dict, path: Path | None = None) -> Path:
+    unknown = set(options) - set(RUN_DEFAULTS)
+    if unknown:
+        raise ValueError(f"unknown run options: {sorted(unknown)}")
+    if "mode" in options and options["mode"] not in RUN_MODES:
+        raise ValueError(f"unknown run mode {options['mode']!r}")
+    data = load(path)
+    run = data.setdefault("gui", {}).setdefault("run", {})
+    run.update({k: v for k, v in options.items() if v is not None})
+    return save(data, path)
+
+
 def generator_config(path: Path | None = None) -> "GeneratorConfig":
     """The persistent generator configuration (defaults for every missing key)."""
     from deepyugioh.generator.config import GeneratorConfig

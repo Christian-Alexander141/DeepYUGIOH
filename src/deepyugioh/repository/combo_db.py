@@ -131,19 +131,19 @@ class ComboRepository:
                 ),
             )
             run_id = cur.lastrowid
-            new = 0
+            new_sigs = []
             for c in combos:
                 if not c.validated:
                     continue  # Database 1 only holds combos the engine confirmed
                 row = self.db.execute("SELECT id FROM combos WHERE signature = ?", (c.signature,)).fetchone()
                 if row is None:
                     cid = self._insert(c, run_id)
-                    new += 1
+                    new_sigs.append(c.signature)
                 else:
                     cid = row[0]
                 self.db.execute("INSERT OR IGNORE INTO combo_runs VALUES (?,?)", (cid, run_id))
-            self.db.execute("UPDATE runs SET combos_new = ? WHERE id = ?", (new, run_id))
-        return StoreResult(run_id, new)
+            self.db.execute("UPDATE runs SET combos_new = ? WHERE id = ?", (len(new_sigs), run_id))
+        return StoreResult(run_id, len(new_sigs), tuple(new_sigs))
 
     def _insert(self, c: ComboRecord, run_id: int) -> int:
         cid = self.db.execute(

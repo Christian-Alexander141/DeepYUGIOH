@@ -103,12 +103,16 @@ gen.search(setup)                        # ein Startaufbau -> SearchReport(run, 
 gen.run(tiers=[1, 2], max_jobs=10_000,   # global, fortsetzbar, parallel (config.workers)
         time_budget=3600, progress=listener,
         should_stop=event.is_set)        # optional: z. B. Stopp-Knopf der Test-GUI
+gen.run(target_combos=100,               # bis 100 neue Combos in Database 1, ohne Zeitgrenze
+        target_benefit="wins")           # optional: nur Combos mit diesem Nutzen zählen (TARGET_BENEFITS)
 gen.coverage()                           # {stufe: total, cursor, complete, incomplete, error, combos_new}
 ```
 
 - Für parallele Läufe (`workers > 1`) braucht `ComboGenerator` eine picklebare `pool_factory`, z. B. die Klasse `CardStore`. Jeder Worker-Prozess baut sich damit seinen eigenen `CardPool`, und der Generator kennt keine konkrete Implementierung.
 - `run()` setzt dort fort, wo der letzte Lauf aufgehört hat. Der Zustand liegt in `JobStore` (`data/generator.sqlite`). Pro Stufe gibt es einen Cursor, und bereits erledigte Kandidaten werden übersprungen.
 - Ein Fehler in einem Kartenskript bricht den globalen Lauf nicht ab. Der Job wird mit `status = error` und Fehlermeldung gespeichert.
+- `run()` endet an der ersten erreichten Bedingung: `max_jobs`, `time_budget`, `target_combos`, `should_stop()` oder alle Kandidaten der Stufen bearbeitet. `GenerationReport.stop_reason` nennt sie (`target`, `max_jobs`, `time_budget`, `stopped`, `exhausted`). Für das Ziel zählen nur Combos, die in Database 1 neu sind (`target_hits`, `target_reached`). Ist das Ziel erreicht, werden noch nicht gestartete Suchen verworfen und beim nächsten Lauf nachgeholt; laufende werden fertig, daher kann das Ziel überschritten werden.
+- `ComboSink.store_run()` liefert `StoreResult(run_id, new_combos, new_signatures)`; `new_signatures` (Standard leer) nennt die neu eingefügten Combos, damit der Generator sie dem Ziel zuordnen kann. `JobReport.target_hits` enthält den Beitrag einer Suche.
 - `should_stop()` wird vor jeder neuen Suche abgefragt. Liefert es `True`, startet keine neue Suche mehr; laufende werden abgeschlossen und gespeichert, sodass ein späterer Lauf lückenlos fortsetzt.
 
 ### `GeneratorConfig` ([generator/config.py](../src/deepyugioh/generator/config.py))

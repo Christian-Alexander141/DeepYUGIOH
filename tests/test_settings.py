@@ -118,3 +118,63 @@ def test_gui_theme_is_persistent_and_keeps_generator_settings(settings_file):
     assert settings.gui_theme() == "light"            # and saving the generator keeps the GUI section
     with pytest.raises(ValueError):
         settings.set_gui_theme("neon")
+
+
+class _ListSource:
+    """Fixed candidate list for tier 1 (no interaction graph needed)."""
+
+    def __init__(self, setups):
+        from deepyugioh.contracts import Candidate
+
+        self.items = [Candidate(s, 1) for s in setups]
+
+    def version(self):
+        return "test"
+
+    def candidates(self, tier):
+        return iter(self.items if tier == 1 else [])
+
+    def tier_size(self, tier):
+        return len(self.items) if tier == 1 else 0
+
+
+@pytest.fixture
+def target_gen(store, code, tmp_path):
+    from deepyugioh.generator import JobStore
+
+    setups = [
+        StartSetup(hand=(code("Fissure"),)),                                                     # no combo
+        StartSetup(hand=(code("Foolish Burial"), code("Monster Reborn")), deck=(code("Blue-Eyes White Dragon"),)),
+        StartSetup(hand=(code("Pot of Greed"),)),                                                # no combo
+    ]
+    cfg = GeneratorConfig().with_(limits=SearchLimits(time_limit=10, max_nodes=2000))
+    return lambda name: ComboGenerator(store, ComboRepository(tmp_path / f"{name}.sqlite"), cfg,
+                                       source=_ListSource(setups), state=JobStore(tmp_path / f"{name}-jobs.sqlite"))
+
+
+def test_global_run_ends_at_target(target_gen):
+    report = target_gen("any").run(tiers=[1], target_combos=1)
+    assert (report.jobs, report.target_hits, report.target_reached, report.stop_reason) == (2, 1, True, "target")
+    counted = target_gen("field").run(tiers=[1], target_combos=1, target_benefit="field_delta")
+    assert counted.target_reached and counted.jobs == 2
+
+
+def test_global_run_target_not_reached_when_candidates_run_out(target_gen):
+    report = target_gen("wins").run(tiers=[1], target_combos=5, target_benefit="wins")
+    assert report.jobs == 3 and report.combos_new == 1     # the combo is stored, but it does not win
+    assert (report.target_hits, report.target_reached, report.stop_reason) == (0, False, "exhausted")
+    with pytest.raises(ValueError, match="target_benefit"):
+        target_gen("bad").run(tiers=[1], target_combos=1, target_benefit="nope")
+
+
+def test_run_options_are_persistent(settings_file):
+    assert settings.run_options() == settings.RUN_DEFAULTS
+    settings.save_generator_config(GeneratorConfig().with_(workers=2))
+    settings.set_gui_theme("light")
+    settings.set_run_options({"mode": "target", "target": 250, "benefit": "wins"})
+    opts = settings.run_options()
+    assert (opts["mode"], opts["target"], opts["benefit"]) == ("target", 250, "wins")
+    assert settings.gui_theme() == "light" and settings.generator_config().workers == 2
+    with pytest.raises(ValueError):
+        settings.set_run_options({"mode": "forever"})
+    assert fmt.target_text(100, "wins") == "100 neue Combos mit Sieg (Duell gewonnen)"

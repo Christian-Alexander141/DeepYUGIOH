@@ -29,6 +29,7 @@ uv run deepyugioh plan
 
 # globale Suche starten bzw. fortsetzen (setzt am letzten Stand fort)
 uv run deepyugioh generate --tiers 1 2 --workers 8 --time-budget 3600
+uv run deepyugioh generate --tiers 1 2 3 --workers 8 --target 100 --benefit wins   # bis 100 neue Sieg-Combos
 uv run deepyugioh generate --config deepyugioh.example.toml
 
 # einen einzelnen Startaufbau durchsuchen
@@ -65,7 +66,7 @@ uv run deepyugioh testmode off     # wieder ausschalten; DEEPYUGIOH_TEST_MODE=1/
 |---|---|
 | Einstellungen | Alle Suchgrenzen (Min./Max. Karten pro Combo, z. B. 5 oder mehr, Tiefe, Knoten, Zeitlimit, Optionen, Transpositionen, Setzen …), Stufen, Gegnerfelder, Nachbarschaft, Worker, Validierung. „Speichern“ schreibt sie dauerhaft nach `deepyugioh.toml`; die CLI nutzt sie dann ebenfalls. |
 | Einzelsuche | Startaufbau mit Kartensuche zusammenstellen und mit den Formularwerten durchsuchen; Combos mit Endfeld und Linie. Speichern in Database 1 optional. |
-| Globaler Lauf | Optionen des Laufs (Stufen, Max. Suchen, Zeitbudget), Kennzahlen live, Abdeckung pro Stufe und Protokoll. Gestartet und gestoppt wird auch über die Kopfleiste. |
+| Globaler Lauf | Optionen des Laufs (Stufen, Ende bei N neuen Combos, z. B. 100 Sieg-Combos, oder nach Anzahl Suchen bzw. Zeitbudget), Kennzahlen live, Abdeckung pro Stufe und Protokoll. Gestartet und gestoppt wird auch über die Kopfleiste. |
 | Combos (Database 1) | Filtern nach Karte, Nutzen und Kartenanzahl, Details, Läufe einer Combo, Export als JSON. |
 | Läufe & Tuning | Alle gespeicherten Läufe, aufsummierte Abbruchgründe mit der jeweils zuständigen Einstellung; jeder Startaufbau lässt sich in der Einzelsuche mit neuen Grenzen erneut durchsuchen. |
 

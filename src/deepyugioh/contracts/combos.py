@@ -80,6 +80,7 @@ class RunRecord:
 class StoreResult:
     run_id: int
     new_combos: int
+    new_signatures: tuple[str, ...] = ()   # signatures of the combos that were new in Database 1
 
 
 @runtime_checkable

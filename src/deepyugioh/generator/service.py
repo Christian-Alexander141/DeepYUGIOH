@@ -18,7 +18,7 @@ from typing import Callable, Iterable, Protocol
 
 from deepyugioh import paths
 from deepyugioh.contracts.cards import CardPool, InteractionGraph
-from deepyugioh.contracts.combos import ComboRecord, ComboSink, RunRecord
+from deepyugioh.contracts.combos import BENEFIT_CRITERIA, ComboRecord, ComboSink, RunRecord
 from deepyugioh.contracts.setups import Candidate, StartSetup
 from deepyugioh.generator.candidates import CandidateSource, GraphCandidateSource
 from deepyugioh.generator.config import GeneratorConfig
@@ -49,6 +49,18 @@ class GenerationReport:
     combos_new: int = 0
     elapsed_s: float = 0.0
     tiers: dict[int, int] = field(default_factory=dict)  # tier -> jobs processed
+    target_hits: int = 0          # new combos counting towards `target_combos`
+    target_reached: bool = False  # the run ended because the target was reached
+    stop_reason: str = ""         # target | max_jobs | time_budget | stopped | exhausted
+
+
+TARGET_BENEFITS = (*BENEFIT_CRITERIA, "wins")
+
+
+def target_hits(combos: Iterable[ComboRecord], new_signatures: Iterable[str], benefit: str | None) -> int:
+    """New combos that count towards a run target: all new ones, or those with `benefit` > 0."""
+    new = set(new_signatures)
+    return sum(1 for c in combos if c.signature in new and (benefit is None or benefit in c.positive))
 
 
 def _git_head(repo: Path) -> str:
@@ -146,17 +158,30 @@ class ComboGenerator:
         progress: ProgressListener | None = None,
         time_budget: float | None = None,
         should_stop: Callable[[], bool] | None = None,
+        target_combos: int | None = None,
+        target_benefit: str | None = None,
     ) -> GenerationReport:
         """Process candidates tier by tier, resuming where the last run stopped.
+
+        The run ends at the first of: `max_jobs` searches, `time_budget` seconds,
+        `target_combos` new combos in Database 1 (only those with a positive
+        `target_benefit`, e.g. "wins", if given), `should_stop()` returning True,
+        or when every candidate of the selected tiers is processed. With only a
+        target set, the run keeps going as long as it takes.
 
         `should_stop` is polled before every new search (e.g. a stop button):
         once it returns True no new searches start, running ones are finished
         and stored, so the run can be resumed later without gaps."""
         if self.sink is None:
             raise ValueError("a global run needs a ComboSink")
+        if target_combos is not None and target_combos < 1:
+            raise ValueError("target_combos must be >= 1")
+        if target_benefit is not None and target_benefit not in TARGET_BENEFITS:
+            raise ValueError(f"unknown target_benefit {target_benefit!r} (known: {', '.join(TARGET_BENEFITS)})")
         report = GenerationReport()
         t0 = time.perf_counter()
         deadline = t0 + time_budget if time_budget else None
+        goal = _Goal(max_jobs, deadline, should_stop, target_combos, target_benefit)
         workers = max(1, self.config.workers)
         executor = None
         if workers > 1:
@@ -168,20 +193,19 @@ class ComboGenerator:
             )
         try:
             for tier in tiers or self.config.candidates.tiers:
-                if max_jobs is not None and report.jobs >= max_jobs:
+                if goal.reached(report):
                     break
-                if deadline and time.perf_counter() > deadline:
-                    break
-                if should_stop is not None and should_stop():
-                    break
-                self._run_tier(tier, report, max_jobs, progress, executor, workers, deadline, should_stop)
+                self._run_tier(tier, report, goal, progress, executor, workers)
         finally:
             if executor is not None:
                 executor.shutdown(cancel_futures=True)
+        report.stop_reason = goal.reason or "exhausted"
+        if target_combos is not None and report.target_hits >= target_combos:
+            report.stop_reason, report.target_reached = "target", True
         report.elapsed_s = time.perf_counter() - t0
         return report
 
-    def _run_tier(self, tier, report, max_jobs, progress, executor, workers, deadline, should_stop=None):
+    def _run_tier(self, tier, report, goal: "_Goal", progress, executor, workers):
         source_version = self.source.version()
         start = self.state.cursor(tier, source_version)
         pending: dict = {}                   # future -> (position, candidate)
@@ -198,15 +222,16 @@ class ComboGenerator:
 
         def finish(position: int, candidate: Candidate, outcome):
             run, combos, error = outcome
-            run_id, new = None, 0
+            run_id, new, hits = None, 0, 0
             if error is None:
                 res = self.sink.store_run(run, combos)
                 run_id, new = res.run_id, res.new_combos
+                hits = target_hits(combos, res.new_signatures, goal.benefit)
                 status = "complete" if run.complete else "incomplete"
                 found, elapsed = run.combos_found, run.elapsed_s
             else:
                 status, found, elapsed = "error", 0, 0.0
-            job = JobReport(candidate.id, tier, position, status, found, new, elapsed, run_id, error)
+            job = JobReport(candidate.id, tier, position, status, found, new, elapsed, run_id, error, hits)
             self.state.record(job)
             report.jobs += 1
             report.tiers[tier] = report.tiers.get(tier, 0) + 1
@@ -218,22 +243,16 @@ class ComboGenerator:
                 report.errors += 1
             report.combos_found += found
             report.combos_new += new
+            report.target_hits += hits
             finished.add(position)
             advance_cursor()
             if progress:
                 progress.on_job(job)
 
-        def stop() -> bool:
-            if max_jobs is not None and report.jobs + len(pending) >= max_jobs:
-                return True
-            if should_stop is not None and should_stop():
-                return True
-            return bool(deadline and time.perf_counter() > deadline)
-
         for position, candidate in enumerate(self.source.candidates(tier)):
             if position < start:
                 continue
-            if stop():
+            if goal.reached(report, len(pending)):
                 break
             if self.state.is_done(candidate.id):
                 report.skipped += 1
@@ -247,6 +266,13 @@ class ComboGenerator:
             pending[fut] = (position, candidate)
             while len(pending) >= 2 * workers:
                 self._collect(pending, finish, block=True)
+                if goal.reached(report):
+                    break  # target met: stop queueing, the searches still running are finished below
+        if goal.reason and goal.reason != "max_jobs":  # max_jobs already counts the queued searches
+            # searches not started yet are dropped (not recorded: the cursor stays before them,
+            # so the next run picks them up); searches already running are finished and stored
+            for fut in [f for f in pending if f.cancel()]:
+                del pending[fut]
         while pending:
             self._collect(pending, finish, block=True)
 
@@ -271,3 +297,28 @@ class ComboGenerator:
             except Exception as e:
                 outcome = (None, [], f"{type(e).__name__}: {e}")
             finish(position, candidate, outcome)
+
+
+@dataclass
+class _Goal:
+    """When a global run stops starting new searches; `reason` records the first stop condition met."""
+
+    max_jobs: int | None
+    deadline: float | None
+    should_stop: Callable[[], bool] | None
+    target: int | None
+    benefit: str | None
+    reason: str = ""
+
+    def reached(self, report: GenerationReport, pending: int = 0) -> bool:
+        if self.reason:
+            return True
+        if self.target is not None and report.target_hits >= self.target:
+            self.reason = "target"
+        elif self.max_jobs is not None and report.jobs + pending >= self.max_jobs:
+            self.reason = "max_jobs"
+        elif self.should_stop is not None and self.should_stop():
+            self.reason = "stopped"
+        elif self.deadline and time.perf_counter() > self.deadline:
+            self.reason = "time_budget"
+        return bool(self.reason)

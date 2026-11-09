@@ -353,6 +353,9 @@ opponent_boards = ["empty", "standard", "wall"]</code></pre>
   <tr><th>Einstellung</th><th>Standard</th><th>Bedeutung</th></tr>
   <tr><td><code>test_mode</code> (oberste Ebene)</td><td><code>false</code></td><td>Schaltet Entwicklerwerkzeuge wie die Test-GUI frei. Setzen mit <code>deepyugioh testmode on|off</code>.</td></tr>
   <tr><td><code>[gui] theme</code></td><td><code>"dark"</code></td><td>Design der GUI, <code>"dark"</code> oder <code>"light"</code>. Wird beim Umschalten in der GUI gespeichert.</td></tr>
+  <tr><td><code>[gui.run] mode</code></td><td><code>"target"</code></td><td>Ende des globalen Laufs in der GUI: <code>target</code>, <code>max_jobs</code>, <code>time_budget</code> oder <code>unlimited</code>. Wird beim Start eines Laufs gespeichert.</td></tr>
+  <tr><td><code>[gui.run] target</code> / <code>benefit</code></td><td><code>100</code> / <code>""</code></td><td>Ziel-Combos und der Nutzen, der gezählt wird (<code>""</code> = jede neue Combo, sonst z. B. <code>"wins"</code>).</td></tr>
+  <tr><td><code>[gui.run] max_jobs</code> / <code>time_budget</code></td><td><code>100</code> / <code>3600</code></td><td>Werte der Modi Anzahl Suchen und Zeitbudget (Sekunden).</td></tr>
   <tr><td><code>DEEPYUGIOH_TEST_MODE</code></td><td>–</td><td><code>1</code>/<code>0</code> (auch true/false, on/off) überschreibt <code>test_mode</code>.</td></tr>
   <tr><td><code>DEEPYUGIOH_SETTINGS</code></td><td>–</td><td>anderer Pfad für die Einstellungsdatei</td></tr>
   <tr><td><code>DEEPYUGIOH_OCGCORE</code></td><td>–</td><td>anderer Pfad zu <code>libocgcore.so</code></td></tr>
@@ -366,14 +369,16 @@ opponent_boards = ["empty", "standard", "wall"]</code></pre>
   <tr><th>Befehl</th><th>Zweck</th><th>Wichtige Optionen</th></tr>
   <tr><td><code>import-cards</code></td><td>Schritte 1–3: Karten importieren, Skripte analysieren, Interaktionsgraph bauen</td><td>–</td></tr>
   <tr><td><code>plan</code></td><td>Stufen, Kandidatenzahlen und Abdeckung der globalen Suche</td><td>Suchgrenzen-Optionen, <code>--config</code></td></tr>
-  <tr><td><code>generate</code></td><td>globale Suche starten oder fortsetzen</td><td><code>--tiers</code>, <code>--max-jobs</code>, <code>--time-budget</code> (s), <code>--workers</code>, <code>--report-every</code> (50)</td></tr>
+  <tr><td><code>generate</code></td><td>globale Suche starten oder fortsetzen</td><td><code>--tiers</code>, <code>--target</code> N (bis N neue Combos), <code>--benefit</code> (nur Combos mit diesem Nutzen zählen, z. B. <code>wins</code>), <code>--max-jobs</code>, <code>--time-budget</code> (s), <code>--workers</code>, <code>--report-every</code> (50)</td></tr>
   <tr><td><code>search</code></td><td>einen Startaufbau durchsuchen</td><td><code>--hand</code> (Pflicht), <code>--deck</code>, <code>--extra</code>, <code>--opponent</code> (<code>empty</code>), <code>--branch-zones</code>, <code>--show</code> (10), <code>--lines</code>, <code>--no-store</code></td></tr>
   <tr><td><code>combos</code></td><td>Database 1 abfragen</td><td><code>--card</code>, <code>--positive</code>, <code>--max-cards</code>, <code>--limit</code> (50), <code>--lines</code></td></tr>
   <tr><td><code>testmode</code></td><td>Testmodus anzeigen oder umschalten</td><td><code>on</code> / <code>off</code></td></tr>
   <tr><td><code>gui</code></td><td>Test-GUI starten (nur im Testmodus)</td><td>–</td></tr>
 </table></div>
+<p>Bei <code>generate</code> endet der Lauf an der ersten erreichten Grenze. Ist nur <code>--target</code> gesetzt, gibt es keine Zeitgrenze für den Lauf. Er endet dann erst, wenn das Ziel erreicht ist oder alle Kandidaten der Stufen bearbeitet sind.</p>
 <p>Suchgrenzen-Optionen für <code>plan</code>, <code>generate</code> und <code>search</code>: <code>--config</code>, <code>--max-cards</code>, <code>--min-cards</code>, <code>--max-depth</code>, <code>--max-nodes</code>, <code>--time-limit</code>, <code>--allow-set</code>.</p>
 <pre><code>uv run deepyugioh generate --tiers 1 2 --workers 8 --time-budget 3600
+uv run deepyugioh generate --tiers 1 2 3 --workers 8 --target 100 --benefit wins   # bis 100 neue Sieg-Combos
 uv run deepyugioh search --hand "Junk Synchron" "Foolish Burial" \
     --deck Doppelwarrior Tuningware --extra "Junk Warrior" "Stardust Dragon" \
     --opponent standard --lines
@@ -395,7 +400,7 @@ uv run deepyugioh testmode off     # wieder ausschalten</code></pre>
   <div class="card"><h4>Kopfleiste</h4><p>Auf jeder Seite sichtbar: Seitentitel, Status des globalen Laufs (Punkt und Text), Fortschrittsbalken, Live-Kennzahlen, <strong>Lauf starten</strong> und <strong>Stoppen</strong>.</p></div>
   <div class="card"><h4>Statuszeile</h4><p>Ganz unten: Rückmeldung zur letzten Aktion, z. B. „Einstellungen gespeichert“ oder die Dauer einer Suche.</p></div>
 </div>
-<p>Der <strong>Status</strong> in der Kopfleiste zeigt <em>Bereit</em> (grau), <em>Globaler Lauf läuft</em> bzw. <em>Einzelsuche läuft</em> (blau), <em>Stoppt</em> (orange) und <em>Letzter Lauf beendet</em> (grün). Der Fortschrittsbalken füllt sich anhand von „Max. Suchen“ oder, falls nicht gesetzt, anhand des Zeitbudgets. Ist beides unbegrenzt, läuft er als Animation. Ein Klick auf die Zeile mit den Laufoptionen öffnet die Seite „Globaler Lauf“.</p>
+<p>Der <strong>Status</strong> in der Kopfleiste zeigt <em>Bereit</em> (grau), <em>Globaler Lauf läuft</em> bzw. <em>Einzelsuche läuft</em> (blau), <em>Stoppt</em> (orange) und <em>Letzter Lauf beendet</em> (grün). Der Fortschrittsbalken zeigt den Weg zum Laufende: Ziel-Combos, Anzahl Suchen oder Zeitbudget. Endet der Lauf erst, wenn alle Kandidaten bearbeitet sind, läuft er als Animation. Im Zielmodus steht der Stand zusätzlich als „Ziel 26/60“ neben dem Status. Ein Klick auf die Zeile mit den Laufoptionen öffnet die Seite „Globaler Lauf“.</p>
 <figure>
   <img src="images/gui-combos-hell.png" alt="Die Seite Combos im hellen Design">
   <figcaption>Dieselbe Oberfläche im hellen Design. Umschalten unten in der Seitenleiste; die Wahl wird gespeichert.</figcaption>
@@ -431,15 +436,23 @@ uv run deepyugioh testmode off     # wieder ausschalten</code></pre>
 <h3 id="gui-lauf">Seite Globaler Lauf</h3>
 <figure>
   <img src="images/gui-globaler-lauf.png" alt="Globaler Lauf mit Laufoptionen, Kennzahlen, Abdeckungstabelle und farbigem Protokoll">
-  <figcaption>Laufender Lauf über Stufe 2: Kennzahlen, Abdeckung pro Stufe und Protokoll. Grüne Zeilen sind Suchen mit neuen Combos.</figcaption>
+  <figcaption>Laufender Lauf über Stufe 1 mit dem Ziel 60 neue Combos: Kennzahlen, Abdeckung pro Stufe und Protokoll. Grüne Zeilen sind Suchen mit neuen Combos.</figcaption>
 </figure>
 <ul>
-  <li><strong>Laufoptionen:</strong> Stufen für diesen Lauf (vorbelegt aus den Einstellungen), <em>Max. Suchen</em> (Standard 100) und <em>Zeitbudget</em> in Sekunden. Leer heißt unbegrenzt.</li>
+  <li><strong>Laufoptionen:</strong> Stufen für diesen Lauf (vorbelegt aus den Einstellungen) und <em>Lauf endet bei</em>:
+    <ul>
+      <li><em>Ziel-Combos erreicht</em> (Standard, 100): Der Lauf hat keine Zeitgrenze. Er sucht, bis so viele <strong>neue</strong> Combos in Database 1 stehen. Mit <em>zählen</em> lassen sich nur Combos mit einem bestimmten Nutzen zählen: <em>Sieg (Duell gewonnen)</em>, <em>Schaden am Gegner</em>, <em>Gegner verliert Feld- bzw. Handkarten</em>, <em>mehr eigene Feld- bzw. Handkarten</em> oder <em>eigene LP gewonnen</em>. Alle übrigen Combos werden trotzdem gespeichert, sie zählen nur nicht zum Ziel.</li>
+      <li><em>Anzahl Suchen</em>: endet nach so vielen Startaufbauten.</li>
+      <li><em>Zeitbudget</em>: endet nach so vielen Sekunden.</li>
+      <li><em>alle Kandidaten bearbeitet</em>: keine Grenze.</li>
+    </ul>
+    Jeder Lauf endet spätestens, wenn alle Kandidaten der gewählten Stufen bearbeitet sind, auch wenn das Ziel noch nicht erreicht ist. Das Protokoll sagt dann „Ziel nicht erreicht“. Die Grenzen pro Suche (Zeitlimit, Knoten) gelten in jedem Modus, sie verhindern, dass eine einzelne Suche endlos läuft. Die Laufoptionen werden beim Start in <code>[gui.run]</code> gespeichert.</li>
+  <li><strong>Ziel überschritten:</strong> Ist das Ziel erreicht, starten keine neuen Suchen mehr. Noch wartende Suchen werden verworfen und beim nächsten Lauf nachgeholt. Suchen, die schon laufen, werden aber fertig und gespeichert. Mit mehreren Prozessen und ergiebigen Kandidaten liegt das Ergebnis deshalb oft über dem Ziel, z. B. 109 statt 60.</li>
   <li><strong>Lauf starten</strong> setzt immer am gespeicherten Stand fort. Bereits erledigte Kandidaten werden übersprungen.</li>
   <li><strong>Stoppen</strong> startet keine neuen Suchen mehr. Laufende Suchen werden noch beendet und gespeichert, damit der nächste Lauf lückenlos fortsetzt. Das Gleiche passiert beim Schließen des Fensters während eines Laufs.</li>
-  <li><strong>Aktueller Lauf:</strong> Suchen, vollständig, unvollständig, Fehler, gefundene und neue Combos, Suchen pro Minute und Laufzeit, jede Sekunde aktualisiert.</li>
+  <li><strong>Aktueller Lauf:</strong> Suchen, vollständig, unvollständig, Fehler, gefundene Combos, neue Combos in Database 1, Stand des Ziels (z. B. <em>26/60</em>, grün wenn erreicht), Suchen pro Minute und Laufzeit, jede Sekunde aktualisiert.</li>
   <li><strong>Abdeckung:</strong> pro Stufe die Zahl der Kandidaten, wie viele erledigt sind (absolut und in Prozent) und deren Ergebnis. Grundlage sind die Kandidaten-Einstellungen im Formular. Nach jedem Lauf wird sie aktualisiert.</li>
-  <li><strong>Protokoll:</strong> Start und Ende eines Laufs (blau), Suchen mit neuen Combos (grün), Fehler (rot) und jede 25. Suche. Es behält die letzten 3000 Zeilen.</li>
+  <li><strong>Protokoll:</strong> Start und Ende eines Laufs (blau, mit Grund des Endes), Suchen mit neuen Combos (grün, im Zielmodus mit Zielstand), Fehler (rot) und jede 25. Suche. Dazu ein Hinweis, ob das Ziel erreicht wurde. Es behält die letzten 3000 Zeilen.</li>
 </ul>
 <div class="warn">
   <p><strong>Wichtig für das Tuning:</strong> Ein globaler Lauf durchsucht keinen Kandidaten zweimal. Neue Suchgrenzen oder Kandidaten-Einstellungen wirken nur auf Kandidaten, die noch nicht bearbeitet wurden. Zum Vergleichen von Einstellungen dient deshalb die Einzelsuche (siehe <a href="#tuning-ablauf">Feintuning</a>). Soll eine Stufe mit neuen Grenzen komplett neu durchsucht werden, muss <code>data/generator.sqlite</code> vorher beiseitegelegt werden. Database 1 bleibt davon unberührt, bekannte Combos werden nur verknüpft.</p>
@@ -515,6 +528,7 @@ gen.search(setup)                              # ein Startaufbau -> SearchReport
 gen.run(tiers=[1, 2], max_jobs=10_000,         # global, fortsetzbar, parallel
         time_budget=3600, progress=listener,
         should_stop=event.is_set)              # z. B. Stopp-Knopf
+gen.run(target_combos=100, target_benefit="wins")  # bis 100 neue Sieg-Combos, ohne Zeitgrenze
 gen.coverage()                                 # Abdeckung pro Stufe</code></pre>
 <div class="table-wrap"><table>
   <tr><th>Vertrag</th><th>Richtung</th><th>Implementierung</th></tr>

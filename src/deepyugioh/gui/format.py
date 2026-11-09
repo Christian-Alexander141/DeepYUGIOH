@@ -26,6 +26,42 @@ INCOMPLETE_HINTS = {
     "engine_rejected_response": "Antwortkodierung prüfen (Bug im Generator)",
 }
 
+# Benefit criteria a run target can count ("" = every new combo)
+TARGET_BENEFIT_LABELS = {
+    "": "jede neue Combo",
+    "wins": "Sieg (Duell gewonnen)",
+    "opp_lp_loss": "Schaden am Gegner",
+    "opp_field_loss": "Gegner verliert Feldkarten",
+    "opp_hand_loss": "Gegner verliert Handkarten",
+    "field_delta": "mehr eigene Feldkarten",
+    "hand_delta": "mehr eigene Handkarten",
+    "lp_gain": "eigene LP gewonnen",
+}
+
+# How a global run can end (settings.RUN_MODES) -> label in the GUI
+RUN_MODE_LABELS = {
+    "target": "Ziel-Combos erreicht",
+    "max_jobs": "Anzahl Suchen",
+    "time_budget": "Zeitbudget",
+    "unlimited": "alle Kandidaten bearbeitet",
+}
+
+# GenerationReport.stop_reason -> sentence for the log
+STOP_REASONS = {
+    "target": "Ziel erreicht",
+    "max_jobs": "Max. Suchen erreicht",
+    "time_budget": "Zeitbudget abgelaufen",
+    "stopped": "gestoppt",
+    "exhausted": "alle Kandidaten der gewählten Stufen bearbeitet",
+}
+
+
+def target_text(target: int, benefit: str) -> str:
+    """'100 neue Combos' or '100 neue Combos mit Sieg (Duell gewonnen)'."""
+    what = f"{target} neue Combo{'' if target == 1 else 's'}"
+    return f"{what} mit {TARGET_BENEFIT_LABELS[benefit]}" if benefit else what
+
+
 _COUNT_PREFIX = re.compile(r"^\s*(\d+)\s*[x×]\s+(.+?)\s*$", re.IGNORECASE)
 
 
