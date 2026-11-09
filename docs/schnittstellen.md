@@ -101,17 +101,21 @@ from deepyugioh.generator import ComboGenerator, GeneratorConfig
 gen = ComboGenerator(pool, sink, GeneratorConfig.load(path), graph=graph)
 gen.search(setup)                        # ein Startaufbau -> SearchReport(run, combos, run_id, new_combos)
 gen.run(tiers=[1, 2], max_jobs=10_000,   # global, fortsetzbar, parallel (config.workers)
-        time_budget=3600, progress=listener)
+        time_budget=3600, progress=listener,
+        should_stop=event.is_set)        # optional: z. B. Stopp-Knopf der Test-GUI
 gen.coverage()                           # {stufe: total, cursor, complete, incomplete, error, combos_new}
 ```
 
 - Für parallele Läufe (`workers > 1`) braucht `ComboGenerator` eine picklebare `pool_factory`, z. B. die Klasse `CardStore`. Jeder Worker-Prozess baut sich damit seinen eigenen `CardPool`, und der Generator kennt keine konkrete Implementierung.
 - `run()` setzt dort fort, wo der letzte Lauf aufgehört hat. Der Zustand liegt in `JobStore` (`data/generator.sqlite`). Pro Stufe gibt es einen Cursor, und bereits erledigte Kandidaten werden übersprungen.
 - Ein Fehler in einem Kartenskript bricht den globalen Lauf nicht ab. Der Job wird mit `status = error` und Fehlermeldung gespeichert.
+- `should_stop()` wird vor jeder neuen Suche abgefragt. Liefert es `True`, startet keine neue Suche mehr; laufende werden abgeschlossen und gespeichert, sodass ein späterer Lauf lückenlos fortsetzt.
 
 ### `GeneratorConfig` ([generator/config.py](../src/deepyugioh/generator/config.py))
 
 Wird im Code gebaut oder aus TOML geladen. Alle Schlüssel mit ihren Voreinstellungen stehen in [deepyugioh.example.toml](../deepyugioh.example.toml). Unbekannte Schlüssel führen zu einem Fehler.
+
+`check()` prüft die Werte auf Widersprüche (z. B. `min_cards > max_cards`, unbekannte Gegnerfelder) und wirft `ValueError`. Die dauerhafte lokale Konfiguration liest und schreibt [settings.py](../src/deepyugioh/settings.py) (`generator_config()`, `save_generator_config(cfg)`); sie liegt in `deepyugioh.toml` und enthält zusätzlich den Schalter `test_mode`.
 
 ### `CandidateSource` ([generator/candidates.py](../src/deepyugioh/generator/candidates.py))
 

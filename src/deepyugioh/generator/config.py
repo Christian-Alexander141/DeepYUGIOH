@@ -104,6 +104,37 @@ class GeneratorConfig:
     def with_(self, **changes) -> "GeneratorConfig":
         return replace(self, **changes)
 
+    def check(self) -> "GeneratorConfig":
+        """Raise ValueError for inconsistent values; returns self for chaining."""
+        lim, cand = self.limits, self.candidates
+        errors = []
+        if lim.min_cards < 1:
+            errors.append("limits.min_cards must be >= 1")
+        if lim.max_cards < lim.min_cards:
+            errors.append("limits.max_cards must be >= limits.min_cards")
+        for name in ("max_depth", "max_nodes", "max_choices"):
+            if getattr(lim, name) < 1:
+                errors.append(f"limits.{name} must be >= 1")
+        if lim.time_limit <= 0:
+            errors.append("limits.time_limit must be > 0")
+        if not cand.tiers:
+            errors.append("candidates.tiers must not be empty")
+        unknown_tiers = set(cand.tiers) - set(TIERS)
+        if unknown_tiers:
+            errors.append(f"unknown tiers: {sorted(unknown_tiers)}")
+        if not cand.opponent_boards:
+            errors.append("candidates.opponent_boards must not be empty")
+        missing = set(cand.opponent_boards) - set(self.opponent_boards)
+        if missing:
+            errors.append(f"unknown opponent boards: {sorted(missing)}")
+        if cand.max_deck_neighbors < 0 or cand.max_extra < 0:
+            errors.append("candidates.max_deck_neighbors and max_extra must be >= 0")
+        if self.workers < 1:
+            errors.append("workers must be >= 1")
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
+
 
 def _merge(obj, values: dict):
     known = {f.name for f in fields(obj)}

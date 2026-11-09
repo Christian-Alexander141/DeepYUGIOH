@@ -213,5 +213,53 @@ class ComboRepository:
         ).fetchall()
         return [dict(zip(("run_id", "candidate", "tier", "opponent_board", "complete"), r)) for r in rows]
 
+    # ---- inspection (test GUI, diagnostics) - not part of ComboReader ------
+    _RUN_COLS = ("id", "finished_at", "candidate", "tier", "setup", "opponent_board", "limits", "nodes", "replays",
+                 "elapsed_s", "complete", "incomplete", "pruned", "combos_found", "combos_new")
+
+    def recent_runs(self, limit: int = 200, *, incomplete_only: bool = False, tier: int | None = None) -> list[dict]:
+        """Latest runs first, JSON columns decoded."""
+        where, args = [], []
+        if incomplete_only:
+            where.append("complete = 0")
+        if tier is not None:
+            where.append("tier = ?")
+            args.append(tier)
+        sql = f"SELECT {', '.join(self._RUN_COLS)} FROM runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        out = []
+        for row in self.db.execute(sql, (*args, limit)).fetchall():
+            r = dict(zip(self._RUN_COLS, row))
+            for k in ("setup", "limits", "incomplete", "pruned"):
+                r[k] = json.loads(r[k])
+            r["complete"] = bool(r["complete"])
+            out.append(r)
+        return out
+
+    def stats(self) -> dict:
+        """Totals for tuning the generator: what was found and why searches stopped early."""
+        q = lambda sql: self.db.execute(sql).fetchall()
+        runs, complete, elapsed, nodes = q(
+            "SELECT COUNT(*), COALESCE(SUM(complete), 0), COALESCE(AVG(elapsed_s), 0), COALESCE(AVG(nodes), 0) FROM runs"
+        )[0]
+        return {
+            "combos": self.count(),
+            "runs": runs,
+            "runs_complete": complete,
+            "avg_elapsed_s": elapsed,
+            "avg_nodes": nodes,
+            "by_card_count": dict(q("SELECT card_count, COUNT(*) FROM combos GROUP BY card_count ORDER BY card_count")),
+            "by_benefit": dict(q("SELECT criterion, COUNT(*) FROM combo_benefits GROUP BY criterion ORDER BY 2 DESC")),
+            # reason -> (runs affected, total count)
+            "incomplete": {k: (n, s) for k, n, s in q(
+                "SELECT j.key, COUNT(*), SUM(j.value) FROM runs, json_each(runs.incomplete) j GROUP BY j.key ORDER BY 2 DESC"
+            )},
+            "pruned": {k: (n, s) for k, n, s in q(
+                "SELECT j.key, COUNT(*), SUM(j.value) FROM runs, json_each(runs.pruned) j GROUP BY j.key ORDER BY 3 DESC"
+            )},
+        }
+
     def close(self):
         self.db.close()

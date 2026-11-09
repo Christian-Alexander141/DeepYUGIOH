@@ -54,6 +54,19 @@ class CardStore:
             return card
         return self.by_name(str(ref))
 
+    def search(self, text: str, limit: int = 50) -> list[CardInfo]:
+        """Cards whose name contains `text` (case-insensitive), exact matches first."""
+        text = text.strip()
+        if not text:
+            return []
+        pattern = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = self._db.execute(
+            "SELECT code FROM cards WHERE is_alt_art = 0 AND name LIKE ? ESCAPE '\\'"
+            " ORDER BY name <> ? COLLATE NOCASE, length(name), name LIMIT ?",
+            (pattern, text, limit),
+        ).fetchall()
+        return [self.cards[r[0]] for r in rows]
+
     def name(self, code: int) -> str:
         card = self.get(code)
         return card.name if card else str(code)

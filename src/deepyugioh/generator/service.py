@@ -145,8 +145,13 @@ class ComboGenerator:
         max_jobs: int | None = None,
         progress: ProgressListener | None = None,
         time_budget: float | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> GenerationReport:
-        """Process candidates tier by tier, resuming where the last run stopped."""
+        """Process candidates tier by tier, resuming where the last run stopped.
+
+        `should_stop` is polled before every new search (e.g. a stop button):
+        once it returns True no new searches start, running ones are finished
+        and stored, so the run can be resumed later without gaps."""
         if self.sink is None:
             raise ValueError("a global run needs a ComboSink")
         report = GenerationReport()
@@ -167,14 +172,16 @@ class ComboGenerator:
                     break
                 if deadline and time.perf_counter() > deadline:
                     break
-                self._run_tier(tier, report, max_jobs, progress, executor, workers, deadline)
+                if should_stop is not None and should_stop():
+                    break
+                self._run_tier(tier, report, max_jobs, progress, executor, workers, deadline, should_stop)
         finally:
             if executor is not None:
                 executor.shutdown(cancel_futures=True)
         report.elapsed_s = time.perf_counter() - t0
         return report
 
-    def _run_tier(self, tier, report, max_jobs, progress, executor, workers, deadline):
+    def _run_tier(self, tier, report, max_jobs, progress, executor, workers, deadline, should_stop=None):
         source_version = self.source.version()
         start = self.state.cursor(tier, source_version)
         pending: dict = {}                   # future -> (position, candidate)
@@ -218,6 +225,8 @@ class ComboGenerator:
 
         def stop() -> bool:
             if max_jobs is not None and report.jobs + len(pending) >= max_jobs:
+                return True
+            if should_stop is not None and should_stop():
                 return True
             return bool(deadline and time.perf_counter() > deadline)
 

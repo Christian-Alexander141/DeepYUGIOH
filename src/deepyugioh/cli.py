@@ -5,11 +5,17 @@
     deepyugioh generate --tiers 1 2         global, resumable search into Database 1
     deepyugioh search --hand ... [--deck ...] [--extra ...] [--opponent standard]
     deepyugioh combos [--card NAME] [--positive opp_field_loss] [--lines]
+    deepyugioh testmode [on|off]            show or switch test mode
+    deepyugioh gui                          test GUI for tuning the generator (test mode only)
+
+Without --config the generator settings come from the local settings file
+(deepyugioh.toml, written by the test GUI); missing keys use the defaults.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -18,9 +24,13 @@ _HIDDEN_STEPS = {"no chain", "place", "position", "keep order"}
 
 
 def _config(args):
+    from deepyugioh import settings
     from deepyugioh.generator import GeneratorConfig
 
-    cfg = GeneratorConfig.load(Path(args.config)) if getattr(args, "config", None) else GeneratorConfig()
+    if getattr(args, "config", None):
+        cfg = GeneratorConfig.load(Path(args.config))
+    else:
+        cfg = settings.generator_config()  # defaults if the settings file does not exist
     if getattr(args, "workers", None):
         cfg = cfg.with_(workers=args.workers)
     overrides = {
@@ -157,6 +167,37 @@ def cmd_combos(args) -> int:
     return 0
 
 
+def cmd_testmode(args) -> int:
+    from deepyugioh import settings
+
+    if args.state is not None:
+        path = settings.set_test_mode(args.state == "on")
+        print(f"test mode {args.state} (stored in {path})")
+    active = settings.test_mode()
+    print(f"test mode is {'ACTIVE' if active else 'off'}" + (" - start the GUI with `deepyugioh gui`" if active else ""))
+    if settings.TEST_MODE_ENV in os.environ:
+        print(f"note: {settings.TEST_MODE_ENV}={os.environ[settings.TEST_MODE_ENV]} overrides the settings file")
+    return 0
+
+
+def cmd_gui(args) -> int:
+    from deepyugioh import settings
+
+    if not settings.test_mode():
+        print("error: the test GUI is only available in test mode - run `deepyugioh testmode on` "
+              f"(or set {settings.TEST_MODE_ENV}=1)", file=sys.stderr)
+        return 2
+    import tkinter
+
+    from deepyugioh.gui import run_gui
+
+    try:
+        return run_gui()
+    except tkinter.TclError as e:
+        print(f"error: cannot open the GUI ({e}) - is a display available?", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="deepyugioh")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -204,6 +245,12 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--limit", type=int, default=50)
     c.add_argument("--lines", action="store_true")
     c.set_defaults(fn=cmd_combos)
+
+    t = sub.add_parser("testmode", help="show or switch test mode (enables the test GUI)")
+    t.add_argument("state", nargs="?", choices=["on", "off"])
+    t.set_defaults(fn=cmd_testmode)
+
+    sub.add_parser("gui", help="test GUI: tune the generator, read results (test mode only)").set_defaults(fn=cmd_gui)
 
     args = p.parse_args(argv)
     try:

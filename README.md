@@ -42,6 +42,26 @@ uv run deepyugioh combos --positive opp_field_loss
 
 Karten können per englischem Namen oder Passcode angegeben werden.
 
+Ohne `--config` verwenden `plan`, `generate` und `search` die dauerhaften Einstellungen aus `deepyugioh.toml` (lokal, nicht versioniert; fehlende Schlüssel = Standardwerte).
+
+## Test-GUI (nur im Testmodus)
+
+Zum Feintuning des Generators und zum Auslesen der Ergebnisse gibt es eine grafische Oberfläche (tkinter, keine zusätzlichen Abhängigkeiten). Sie startet nur bei aktivem Testmodus:
+
+```bash
+uv run deepyugioh testmode on      # Testmodus dauerhaft einschalten (steht in deepyugioh.toml)
+uv run deepyugioh gui
+uv run deepyugioh testmode off     # wieder ausschalten; DEEPYUGIOH_TEST_MODE=1/0 überschreibt die Datei
+```
+
+| Reiter | Inhalt |
+|---|---|
+| Einstellungen | Alle Suchgrenzen (Min./Max. Karten pro Combo, z. B. 5 oder mehr, Tiefe, Knoten, Zeitlimit, Optionen, Transpositionen, Setzen …), Stufen, Gegnerfelder, Nachbarschaft, Worker, Validierung. „Speichern“ schreibt sie dauerhaft nach `deepyugioh.toml`; die CLI nutzt sie dann ebenfalls. |
+| Einzelsuche | Startaufbau mit Kartensuche zusammenstellen und mit den Formularwerten durchsuchen; Combos mit Endfeld und Linie. Speichern in Database 1 optional. |
+| Globaler Lauf | Fortsetzbarer Lauf über die Stufen mit Max. Suchen, Zeitbudget und Stopp-Knopf; Fortschritt, Protokoll und Abdeckung pro Stufe. |
+| Combos (Database 1) | Filtern nach Karte, Nutzen und Kartenanzahl, Details, Läufe einer Combo, Export als JSON. |
+| Läufe & Tuning | Alle gespeicherten Läufe, aufsummierte Abbruchgründe mit der jeweils zuständigen Einstellung; jeder Startaufbau lässt sich in der Einzelsuche mit neuen Grenzen erneut durchsuchen. |
+
 ## Aufbau
 
 | Pfad | Inhalt |
@@ -51,6 +71,8 @@ Karten können per englischem Namen oder Passcode angegeben werden.
 | [src/deepyugioh/generator/](src/deepyugioh/generator/) | Combo Generator: Startaufbauten, Suche, Validierung, Jobs (Schritte 4–5) |
 | [src/deepyugioh/engine/](src/deepyugioh/engine/) | ctypes-Anbindung an ygopro-core |
 | [src/deepyugioh/repository/](src/deepyugioh/repository/) | Database 1 – Combo Repository (Schritt 6) |
+| [src/deepyugioh/gui/](src/deepyugioh/gui/) | Test-GUI (nur im Testmodus) |
+| [src/deepyugioh/settings.py](src/deepyugioh/settings.py) | Dauerhafte lokale Einstellungen und Testmodus |
 | [third_party/](third_party/) | ygopro-core, CardScripts, BabelCDB (Submodules) |
 
 Erzeugte Daten liegen in `data/` (nicht versioniert):
