@@ -106,3 +106,15 @@ def test_global_run_stops_on_request(store, tmp_path):
     gen = ComboGenerator(store, ComboRepository(tmp_path / "c.sqlite"), GeneratorConfig(), graph=graph,
                          state=JobStore(tmp_path / "g.sqlite"))
     assert gen.run(tiers=[1], should_stop=lambda: True).jobs == 0
+
+
+def test_gui_theme_is_persistent_and_keeps_generator_settings(settings_file):
+    assert settings.gui_theme() == "dark"
+    settings.save_generator_config(GeneratorConfig().with_(workers=5))
+    settings.set_gui_theme("light")
+    assert settings.gui_theme() == "light"
+    assert settings.generator_config().workers == 5   # GUI section does not disturb the generator part
+    settings.save_generator_config(GeneratorConfig())
+    assert settings.gui_theme() == "light"            # and saving the generator keeps the GUI section
+    with pytest.raises(ValueError):
+        settings.set_gui_theme("neon")

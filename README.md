@@ -2,6 +2,9 @@
 
 Autonomes Forschungssystem für Yu-Gi-Oh!-Strategien. Phase 1 ist der **Combo Generator**: Er erzeugt aus dem gesamten Kartenpool Startaufbauten, lässt eine echte Spiel-Engine alle Combos darin suchen und speichert jede validierte Combo im Combo Repository (Database 1).
 
+![Test-GUI des Combo Generators während eines globalen Laufs](docs/images/gui-globaler-lauf.png)
+
+- **Ausführliche Softwaredokumentation** inklusive GUI und aller Einstellungen: [docs/software-dokumentation.html](docs/software-dokumentation.html) (im Browser öffnen)
 - Vision und Architektur: [docs/konzept.md](docs/konzept.md)
 - Definitionen, Startaufbauten, Suchgrenzen: [docs/combo-generator-spec.md](docs/combo-generator-spec.md)
 - Schnittstellen des Generator-Moduls: [docs/schnittstellen.md](docs/schnittstellen.md)
@@ -44,9 +47,13 @@ Karten können per englischem Namen oder Passcode angegeben werden.
 
 Ohne `--config` verwenden `plan`, `generate` und `search` die dauerhaften Einstellungen aus `deepyugioh.toml` (lokal, nicht versioniert; fehlende Schlüssel = Standardwerte).
 
-## Test-GUI (nur im Testmodus)
+## Benutzeroberflächen
 
-Zum Feintuning des Generators und zum Auslesen der Ergebnisse gibt es eine grafische Oberfläche (tkinter, keine zusätzlichen Abhängigkeiten). Sie startet nur bei aktivem Testmodus:
+Jede Stufe des Systems bekommt eine eigene Test-GUI nach dem Vorbild der GUI des Combo Generators: gleiches Design, gleiche Bedienung, nur im Testmodus verfügbar. Aufbau und Gestaltungsregeln für weitere GUIs stehen in der [Softwaredokumentation, Abschnitt 10](docs/software-dokumentation.html#gui-technik).
+
+### Phase 1: Combo Generator (Test-GUI)
+
+Zum Feintuning des Generators und zum Auslesen der Ergebnisse gibt es eine grafische Oberfläche (tkinter, keine zusätzlichen Abhängigkeiten, dunkles und helles Design). Links liegt die Navigation, oben eine feste Kopfleiste mit **Lauf starten / Stoppen**, Fortschrittsbalken und Live-Kennzahlen des globalen Laufs; sie ist auf jeder Seite verfügbar. Die GUI startet nur bei aktivem Testmodus:
 
 ```bash
 uv run deepyugioh testmode on      # Testmodus dauerhaft einschalten (steht in deepyugioh.toml)
@@ -58,9 +65,22 @@ uv run deepyugioh testmode off     # wieder ausschalten; DEEPYUGIOH_TEST_MODE=1/
 |---|---|
 | Einstellungen | Alle Suchgrenzen (Min./Max. Karten pro Combo, z. B. 5 oder mehr, Tiefe, Knoten, Zeitlimit, Optionen, Transpositionen, Setzen …), Stufen, Gegnerfelder, Nachbarschaft, Worker, Validierung. „Speichern“ schreibt sie dauerhaft nach `deepyugioh.toml`; die CLI nutzt sie dann ebenfalls. |
 | Einzelsuche | Startaufbau mit Kartensuche zusammenstellen und mit den Formularwerten durchsuchen; Combos mit Endfeld und Linie. Speichern in Database 1 optional. |
-| Globaler Lauf | Fortsetzbarer Lauf über die Stufen mit Max. Suchen, Zeitbudget und Stopp-Knopf; Fortschritt, Protokoll und Abdeckung pro Stufe. |
+| Globaler Lauf | Optionen des Laufs (Stufen, Max. Suchen, Zeitbudget), Kennzahlen live, Abdeckung pro Stufe und Protokoll. Gestartet und gestoppt wird auch über die Kopfleiste. |
 | Combos (Database 1) | Filtern nach Karte, Nutzen und Kartenanzahl, Details, Läufe einer Combo, Export als JSON. |
 | Läufe & Tuning | Alle gespeicherten Läufe, aufsummierte Abbruchgründe mit der jeweils zuständigen Einstellung; jeder Startaufbau lässt sich in der Einzelsuche mit neuen Grenzen erneut durchsuchen. |
+
+<table>
+  <tr>
+    <td><img src="docs/images/gui-einstellungen.png" alt="Einstellungen"><br><sub>Einstellungen</sub></td>
+    <td><img src="docs/images/gui-einzelsuche.png" alt="Einzelsuche"><br><sub>Einzelsuche</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/gui-combos.png" alt="Combos in Database 1"><br><sub>Combos (Database 1)</sub></td>
+    <td><img src="docs/images/gui-laeufe-tuning.png" alt="Läufe und Tuning"><br><sub>Läufe &amp; Tuning</sub></td>
+  </tr>
+</table>
+
+Bedienung, alle Seiten und das Vorgehen beim Feintuning: [Softwaredokumentation, Abschnitt 7](docs/software-dokumentation.html#gui).
 
 ## Aufbau
 

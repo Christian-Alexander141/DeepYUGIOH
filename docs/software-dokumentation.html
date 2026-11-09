@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepYUGIOH Softwaredokumentation</title>
+<style>
+  :root {
+    --bg: #f5f7fb; --surface: #ffffff; --tile: #f0f3f8; --border: #d9dee7; --fg: #1c2230; --muted: #5f6879;
+    --accent: #2f6bed; --accent-soft: #e3ecff; --ok: #1a7f37; --warn: #9a6700; --warn-soft: #fff4d6; --danger: #cf222e;
+    --code-bg: #eef1f6; --side: #1c2230; --side-fg: #b7bfce;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15181e; --surface: #1e222a; --tile: #262b35; --border: #323946; --fg: #e4e8ef; --muted: #98a1b2;
+      --accent: #5b97ff; --accent-soft: #1f2f4f; --ok: #3fb950; --warn: #d29922; --warn-soft: #3a2f12; --danger: #f0524a;
+      --code-bg: #262b35; --side: #0f1115; --side-fg: #a3abba;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, kbd { font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", Menlo, monospace; font-size: .88em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 .35em; background: var(--surface); }
+
+  .layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 100vh; }
+  nav.toc { position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--side); color: var(--side-fg); padding: 28px 22px; }
+  nav.toc .brand { color: #fff; font-weight: 700; font-size: 1.25rem; }
+  nav.toc .sub { font-size: .85rem; margin-bottom: 22px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  nav.toc li { margin: 2px 0; }
+  nav.toc a { color: var(--side-fg); display: block; padding: 4px 8px; border-radius: 6px; font-size: .92rem; }
+  nav.toc a:hover { background: rgba(255,255,255,.07); color: #fff; text-decoration: none; }
+  nav.toc ol ol { padding-left: 12px; }
+  nav.toc ol ol a { font-size: .84rem; opacity: .85; }
+
+  main { padding: 40px clamp(16px, 4vw, 56px) 80px; max-width: 1120px; }
+  header.hero h1 { font-size: 2.1rem; margin: 0 0 6px; line-height: 1.2; }
+  header.hero p.lead { color: var(--muted); font-size: 1.08rem; margin: 0 0 18px; max-width: 760px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 26px; }
+  .pill { background: var(--tile); border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; font-size: .82rem; color: var(--muted); }
+  h2 { font-size: 1.55rem; margin: 56px 0 14px; padding-top: 8px; border-top: 1px solid var(--border); }
+  h3 { font-size: 1.15rem; margin: 30px 0 10px; }
+  h4 { font-size: 1rem; margin: 20px 0 6px; }
+  p, li { max-width: 820px; }
+  .muted { color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: .92rem; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--tile); color: var(--muted); font-weight: 600; font-size: .84rem; }
+  tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 16px 0 22px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 4px; }
+  .card p { margin: 0; color: var(--muted); font-size: .92rem; }
+  .note, .warn { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; max-width: 880px; }
+  .warn { border-left-color: var(--warn); background: var(--warn-soft); }
+  .note p, .warn p { margin: 4px 0; }
+
+  figure { margin: 18px 0 28px; }
+  figure img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+  figcaption { color: var(--muted); font-size: .88rem; margin-top: 8px; }
+
+  .flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; max-width: 760px; margin: 18px 0 24px; }
+  .flow .node { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 16px; }
+  .flow .node b { display: block; }
+  .flow .node span { color: var(--muted); font-size: .9rem; }
+  .flow .node.now { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .flow .arrow { align-self: center; color: var(--muted); font-size: .85rem; padding: 4px 0; }
+  .flow .arrow::before { content: "\2193  "; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row .node { flex: 1 1 160px; }
+
+  ol.steps { counter-reset: step; list-style: none; padding: 0; }
+  ol.steps > li { counter-increment: step; position: relative; padding-left: 42px; margin: 12px 0; }
+  ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: .85rem; }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static; height: auto; }
+  }
+  @media print {
+    nav.toc { display: none; }
+    .layout { display: block; }
+    figure img { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Inhalt">
+  <div class="brand">DeepYUGIOH</div>
+  <div class="sub">Softwaredokumentation · Phase 1</div>
+  <ol>
+    <li><a href="#ueberblick">1. Überblick</a></li>
+    <li><a href="#architektur">2. Architektur</a></li>
+    <li><a href="#einrichtung">3. Einrichtung</a></li>
+    <li><a href="#ablauf">4. Arbeitsweise des Generators</a>
+      <ol>
+        <li><a href="#combo">Was ist eine Combo?</a></li>
+        <li><a href="#startaufbau">Startaufbauten</a></li>
+        <li><a href="#stufen">Stufen</a></li>
+        <li><a href="#grenzen">Suchgrenzen und Pruning</a></li>
+      </ol>
+    </li>
+    <li><a href="#einstellungen">5. Einstellungen</a>
+      <ol>
+        <li><a href="#quellen">Quellen und Vorrang</a></li>
+        <li><a href="#ref-limits">Suchgrenzen</a></li>
+        <li><a href="#ref-candidates">Startaufbauten</a></li>
+        <li><a href="#ref-run">Ausführung</a></li>
+        <li><a href="#ref-boards">Gegnerfelder</a></li>
+        <li><a href="#ref-other">Testmodus, Design, Umgebung</a></li>
+      </ol>
+    </li>
+    <li><a href="#cli">6. Kommandozeile</a></li>
+    <li><a href="#gui">7. Test-GUI</a>
+      <ol>
+        <li><a href="#gui-start">Starten</a></li>
+        <li><a href="#gui-aufbau">Aufbau</a></li>
+        <li><a href="#gui-einstellungen">Einstellungen</a></li>
+        <li><a href="#gui-einzelsuche">Einzelsuche</a></li>
+        <li><a href="#gui-lauf">Globaler Lauf</a></li>
+        <li><a href="#gui-combos">Combos</a></li>
+        <li><a href="#gui-tuning">Läufe &amp; Tuning</a></li>
+        <li><a href="#tuning-ablauf">Feintuning Schritt für Schritt</a></li>
+      </ol>
+    </li>
+    <li><a href="#daten">8. Datenhaltung</a></li>
+    <li><a href="#schnittstellen">9. Schnittstellen</a></li>
+    <li><a href="#gui-technik">10. GUI-Technik und Vorlage für weitere Stufen</a></li>
+    <li><a href="#tests">11. Tests</a></li>
+    <li><a href="#grenzen-offen">12. Bekannte Grenzen</a></li>
+    <li><a href="#lizenz">13. Lizenz</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>DeepYUGIOH Softwaredokumentation</h1>
+  <p class="lead">Aufbau, Bedienung und Konfiguration von Phase 1, dem Combo Generator, einschließlich der Test-GUI zum Feintuning und Auslesen der Ergebnisse.</p>
+  <div class="meta">
+    <span class="pill">Stand 9. November 2026</span>
+    <span class="pill">Version 0.1.0</span>
+    <span class="pill">Datenformat SCHEMA_VERSION 2</span>
+    <span class="pill">Python ≥ 3.12</span>
+  </div>
+</header>
+
+<figure>
+  <img src="images/gui-globaler-lauf.png" alt="Test-GUI während eines globalen Laufs: Seitenleiste, Kopfleiste mit Fortschritt, Kennzahlen, Abdeckung und Protokoll">
+  <figcaption>Die Test-GUI während eines globalen Laufs über Stufe 2.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="ueberblick">1. Überblick</h2>
+<p>DeepYUGIOH ist ein Forschungssystem, das selbstständig Yu-Gi-Oh!-Kartenkombinationen entdecken, bewerten und später zu Decks zusammensetzen soll. Das Projekt ist in unabhängige Stufen geteilt. Diese Dokumentation beschreibt <strong>Phase 1, den Combo Generator</strong>: Er erzeugt aus dem gesamten Kartenpool Startaufbauten, lässt eine echte Spiel-Engine darin alle Combos suchen und speichert jede validierte Combo in <strong>Database 1</strong>, dem Combo Repository.</p>
+<div class="cards">
+  <div class="card"><h4>Global</h4><p>Keine vorgegebenen Starterkarten, Archetypen oder Meta-Decks. Jede Karte darf Teil einer Combo sein.</p></div>
+  <div class="card"><h4>ALL</h4><p>Jede gültige Combo wird gespeichert. Der Generator bewertet nicht, wie gut sie ist.</p></div>
+  <div class="card"><h4>Engine entscheidet</h4><p>Nur ygopro-core legt fest, ob eine Combo funktioniert. Jede gespeicherte Combo wird per Replay bestätigt.</p></div>
+  <div class="card"><h4>Fortsetzbar</h4><p>Die globale Suche läuft über Tage bis Monate und setzt jederzeit am gespeicherten Stand fort.</p></div>
+</div>
+<p>Weiterführende Dokumente im Repository: <a href="konzept.md">konzept.md</a> (Vision und Gesamtarchitektur), <a href="combo-generator-spec.md">combo-generator-spec.md</a> (verbindliche Definitionen) und <a href="schnittstellen.md">schnittstellen.md</a> (Verträge des Moduls).</p>
+
+<!-- ============================================================ -->
+<h2 id="architektur">2. Architektur</h2>
+<p>Das Gesamtsystem trennt das Entdecken von Combos strikt von ihrer Bewertung. Grundsatz: <em>Database 1 speichert, was möglich ist. Database 2 speichert, wie gut es ist. Der Deckbauer entscheidet, was davon zusammengehört.</em></p>
+<div class="flow" role="img" aria-label="Stufen des Gesamtsystems">
+  <div class="node"><b>Card Knowledge System</b><span>Kartenpool, Texte, Skripte, Effektanalyse, Interaktionsgraph</span></div>
+  <div class="arrow">CardPool, InteractionGraph</div>
+  <div class="node now"><b>Combo Generator (Phase 1, diese Dokumentation)</b><span>Startaufbauten, erschöpfende Suche, Validierung per Replay</span></div>
+  <div class="arrow">ComboSink</div>
+  <div class="node"><b>Database 1: Combo Repository</b><span>nur Combos, keine Bewertungen</span></div>
+  <div class="arrow">ComboReader (nur lesend)</div>
+  <div class="row">
+    <div class="node"><b>Brick Analyzer</b><span>Konsistenz</span></div>
+    <div class="node"><b>Execution Analyzer</b><span>Ausführbarkeit</span></div>
+    <div class="node"><b>Robustness Analyzer</b><span>Unterbrechungen</span></div>
+    <div class="node"><b>Strategy Analyzer</b><span>Stärke</span></div>
+  </div>
+  <div class="arrow"></div>
+  <div class="node"><b>Database 2, Quality Filter, Deck Construction Engine</b><span>spätere Phasen</span></div>
+</div>
+
+<h3>Module im Code</h3>
+<div class="table-wrap"><table>
+  <tr><th>Paket</th><th>Aufgabe</th><th>Wichtige Dateien</th></tr>
+  <tr><td><code>deepyugioh.contracts</code></td><td>Verträge zwischen den Modulen: Datentypen und Protokolle. Module kennen einander nur hierüber.</td><td><code>cards.py</code>, <code>setups.py</code>, <code>combos.py</code></td></tr>
+  <tr><td><code>deepyugioh.cards</code></td><td>Card Knowledge System, Schritte 1–3: Import der Kartendaten (BabelCDB) und Skripte (CardScripts), statische Skriptanalyse, Interaktionsgraph mit Helferrollen.</td><td><code>importer.py</code>, <code>effects.py</code>, <code>references.py</code>, <code>graph.py</code>, <code>store.py</code></td></tr>
+  <tr><td><code>deepyugioh.engine</code></td><td>ctypes-Anbindung an ygopro-core (API 11): Duell erzeugen, Nachrichten lesen, Antworten senden, Spielzustand abfragen.</td><td><code>ocg.py</code>, <code>duel.py</code>, <code>messages.py</code>, <code>constants.py</code></td></tr>
+  <tr><td><code>deepyugioh.generator</code></td><td>Combo Generator, Schritte 4–5: Startaufbauten, Tiefensuche, Nutzenmessung, Validierung, fortsetzbare parallele Läufe.</td><td><code>service.py</code>, <code>candidates.py</code>, <code>config.py</code>, <code>jobs.py</code>, <code>search/*</code></td></tr>
+  <tr><td><code>deepyugioh.repository</code></td><td>Database 1 (SQLite), implementiert <code>ComboSink</code> und <code>ComboReader</code>.</td><td><code>combo_db.py</code></td></tr>
+  <tr><td><code>deepyugioh.settings</code></td><td>Dauerhafte lokale Einstellungen (<code>deepyugioh.toml</code>), Testmodus, GUI-Design.</td><td><code>settings.py</code></td></tr>
+  <tr><td><code>deepyugioh.gui</code></td><td>Test-GUI (tkinter), nur im Testmodus.</td><td><code>app.py</code>, <code>theme.py</code>, <code>format.py</code></td></tr>
+  <tr><td><code>deepyugioh.cli</code></td><td>Kommandozeile, eine dünne Schicht über den Modulschnittstellen.</td><td><code>cli.py</code></td></tr>
+</table></div>
+<p>Fremdkomponenten liegen als Git-Submodule unter <code>third_party/</code>: <a href="https://github.com/edo9300/ygopro-core">ygopro-core</a> (Engine), <a href="https://github.com/ProjectIgnis/CardScripts">CardScripts</a> (Lua-Kartenskripte) und <a href="https://github.com/ProjectIgnis/BabelCDB">BabelCDB</a> (Kartendaten). Ihre Commits werden zu jedem Lauf gespeichert.</p>
+
+<!-- ============================================================ -->
+<h2 id="einrichtung">3. Einrichtung</h2>
+<p>Voraussetzungen: Linux, gcc/g++ mit C++17, ninja und <a href="https://docs.astral.sh/uv/">uv</a>. Die Test-GUI braucht zusätzlich eine grafische Sitzung (X11).</p>
+<pre><code>git submodule update --init --recursive   # Engine, Kartenskripte, Kartendatenbank
+uv sync                                   # Python-Umgebung inklusive meson
+scripts/build_core.sh                     # baut build/ocgcore/libocgcore.so
+uv run deepyugioh import-cards            # Schritte 1-3: Karten, Effekte, Interaktionsgraph
+uv run pytest                             # Tests gegen die echte Engine</code></pre>
+<p><code>import-cards</code> liest alle Karten, analysiert ihre Skripte und baut den Interaktionsgraphen. Danach liegen die Daten in <code>data/cards.sqlite</code>. Der Befehl muss erneut laufen, wenn die Submodule aktualisiert werden. Dabei ändert sich die Graph-Version und damit die Reihenfolge der Kandidaten (siehe <a href="#grenzen-offen">Bekannte Grenzen</a>).</p>
+
+<!-- ============================================================ -->
+<h2 id="ablauf">4. Arbeitsweise des Generators</h2>
+<ol class="steps">
+  <li><strong>Karten importieren.</strong> Kartendaten aus BabelCDB und Lua-Skripte aus CardScripts werden in <code>data/cards.sqlite</code> geladen. Alternative Artworks werden erkannt.</li>
+  <li><strong>Effekte analysieren.</strong> Die Skripte werden statisch ausgewertet: Kategorien, Effekttyp, Ereignis, Bereich und Einmal-pro-Zug-Grenzen je Effekt, außerdem genannte Karten, Archetypen und einfache Filter (Level, Typ, Attribut). Das sind nur Hinweise für die Kandidatenauswahl.</li>
+  <li><strong>Interaktionen finden.</strong> Aus „was eine Karte bewirkt“ (Friedhof, Hand, Spezialbeschwörung, Verbannen) und „worauf eine Karte reagiert“ entsteht ein Graph. Jede Interaktion bekommt eine Stufe: <code>NAMED</code>, <code>RESTRICTED</code>, <code>CONSTRAINED</code> oder <code>GENERIC</code>.</li>
+  <li><strong>Startaufbauten erzeugen.</strong> Aus einer oder zwei Kernkarten wird ein konkreter Spielzustand gebaut (Hand, Deck, Extra Deck, Gegnerfeld).</li>
+  <li><strong>Erschöpfend suchen.</strong> Eine Tiefensuche probiert jede Antwort aus, die die Engine anbietet. An jedem Endzustand wird der Nutzen gemessen. Verzweigt wird derzeit per Replay: Für eine Alternative wird ein frisches Duell erzeugt und der Weg dorthin erneut abgespielt.</li>
+  <li><strong>Validieren und speichern.</strong> Jede gefundene Linie wird in einem neuen Duell nachgespielt. Nur wenn der Endzustand exakt übereinstimmt, kommt die Combo in Database 1, zusammen mit dem Lauf und seiner Herkunft.</li>
+</ol>
+
+<h3 id="combo">Was ist eine Combo?</h3>
+<p>Eine Combo ist eine Folge von Aktionen von Spieler 0 in einem Zug, die</p>
+<ul>
+  <li>höchstens <code>max_cards</code> (Standard 5) und mindestens <code>min_cards</code> (Standard 2) bestimmte Karten benötigt,</li>
+  <li>in mindestens einem Kriterium einen positiven Nutzen hat und</li>
+  <li>keine überflüssigen Karten enthält. Erreicht eine echte Teilmenge ihrer Karten denselben Nutzen, ist sie keine eigene Combo (<code>drop_redundant</code>).</li>
+</ul>
+<p><strong>Benötigte Karten</strong> sind benutzte Handkarten, Karten aus dem Deck (gesucht, geschickt oder beschworen, aber nicht gezogen) und Karten aus dem Extra Deck. Tokens und Gegnerkarten zählen nicht.</p>
+<div class="table-wrap"><table>
+  <tr><th>Nutzenkriterium</th><th>Bedeutung</th></tr>
+  <tr><td><code>lp_gain</code></td><td>eigene LP gewonnen</td></tr>
+  <tr><td><code>opp_lp_loss</code></td><td>Schaden beim Gegner</td></tr>
+  <tr><td><code>hand_delta</code></td><td>mehr Handkarten als zu Beginn</td></tr>
+  <tr><td><code>field_delta</code></td><td>mehr eigene Feldkarten (Monster- und Zauber-/Fallenzonen)</td></tr>
+  <tr><td><code>opp_field_loss</code></td><td>gegnerische Feldkarten entfernt (braucht ein Gegnerfeld)</td></tr>
+  <tr><td><code>opp_hand_loss</code></td><td>gegnerische Handkarten entfernt</td></tr>
+  <tr><td><code>wins</code></td><td>Duell gewonnen</td></tr>
+</table></div>
+<p><code>card_advantage</code> (Hand plus Feld) wird mitgespeichert, ist aber kein eigenes Kriterium. Die <strong>Identität</strong> einer Combo (<code>signature</code>) bilden die benötigten Karten, die eigene Seite des Endzustands und die Veränderung der Gegnerseite. Wird dieselbe Combo erneut gefunden, wird nur der neue Lauf mit ihr verknüpft.</p>
+
+<h3 id="startaufbau">Startaufbauten</h3>
+<p>Ein Startaufbau legt fest, welche Karten Spieler 0 in Hand, Deck und Extra Deck hat und was der Gegner besitzt. Für jeden Startaufbau gilt: Master Rule 5, 8000 LP, Beginn in Main Phase 1 von Zug 1 ohne Ziehung, fester Seed. Der Gegner handelt nie.</p>
+<div class="table-wrap"><table>
+  <tr><th>Bereich</th><th>Inhalt bei einem generierten Kandidaten</th></tr>
+  <tr><td>Hand</td><td>Kernkarten, generische Helfer für ihre Bedürfnisse (z. B. Foolish Burial, wenn eine Karte im Friedhof wirkt), bei Extra-Deck-Kernkarten die namentlich genannten Materialien</td></tr>
+  <tr><td>Deck</td><td>zweite Kopie jeder Kernkarte sowie Karten, die die Kernkarten holen können (bis <code>max_deck_neighbors</code>)</td></tr>
+  <tr><td>Extra Deck</td><td>verwandte Extra-Deck-Monster, namentlich genannte zuerst (bis <code>max_extra</code>)</td></tr>
+  <tr><td>Gegner</td><td>eines der Gegnerfelder; jeder Kandidat wird gegen jedes ausgewählte Feld gesucht</td></tr>
+</table></div>
+<p><strong>Helferrollen:</strong> <code>SEND_GY_FROM_DECK</code> (Foolish Burial), <code>SPSUMMON_FROM_GY</code> (Monster Reborn) und <code>BANISH_FROM_GY</code> (Soul Release). Pro Rolle wird der generische Zauber mit dem kürzesten Skript als Vertreter gewählt. Ob Helfer ergänzt werden, steuert <code>enablers</code>.</p>
+
+<h3 id="stufen">Stufen</h3>
+<p>Alle Stufen zusammen bilden den vollständigen Suchraum. Die Stufe legt nur fest, was zuerst durchsucht wird. Kandidatenzahlen bei zwei Gegnerfeldern:</p>
+<div class="table-wrap"><table>
+  <tr><th>Stufe</th><th>Kernkarten</th><th>Kandidaten</th><th>Grobe Dauer (4 Worker)</th></tr>
+  <tr><td>1</td><td>jede Startkarte allein (13.521)</td><td>27.042</td><td>Stunden</td></tr>
+  <tr><td>2</td><td>NAMED/RESTRICTED-Paare: eine Karte nennt die andere oder ihren Archetyp</td><td>133.164</td><td>etwa 1 Tag</td></tr>
+  <tr><td>3</td><td>CONSTRAINED-Paare: generischer Effekt mit Filter, z. B. Level ≤ 2</td><td>1.502.412</td><td>Wochen</td></tr>
+  <tr><td>4</td><td>GENERIC-Paare: „irgendein Monster“</td><td>9.810.700</td><td>Monate</td></tr>
+</table></div>
+
+<h3 id="grenzen">Suchgrenzen und Pruning</h3>
+<p>Innerhalb der Grenzen ist die Suche erschöpfend. Jede überschrittene Grenze wird im Lauf als Abbruchgrund gespeichert (<code>runs.incomplete</code>). Ein Lauf ist nur dann <em>vollständig</em>, wenn keine Grenze erreicht wurde. Diese Abbruchgründe sind das wichtigste Werkzeug zum Feintuning, siehe <a href="#gui-tuning">Läufe &amp; Tuning</a>.</p>
+<div class="table-wrap"><table>
+  <tr><th>Abbruchgrund</th><th>Ursache</th><th>Zuständige Einstellung</th></tr>
+  <tr><td><code>max_nodes</code></td><td>zu viele Entscheidungspunkte in einer Suche</td><td>Max. Knoten pro Suche</td></tr>
+  <tr><td><code>time_limit</code></td><td>Zeitlimit des Startaufbaus erreicht</td><td>Zeitlimit pro Suche</td></tr>
+  <tr><td><code>max_depth</code></td><td>eine Linie wurde zu lang</td><td>Max. Entscheidungen pro Linie</td></tr>
+  <tr><td><code>choices_truncated</code></td><td>Kartenauswahl mit mehr Optionen als erlaubt</td><td>Max. Optionen pro Kartenauswahl</td></tr>
+  <tr><td><code>neighbourhood_truncated:deck</code></td><td>Deck-Nachbarschaft gekappt</td><td>Max. Deck-Nachbarn</td></tr>
+  <tr><td><code>neighbourhood_truncated:extra</code></td><td>Extra Deck gekappt</td><td>Max. Extra Deck</td></tr>
+  <tr><td><code>validation_failed</code></td><td>Replay ergab einen anderen Endzustand</td><td>keine; Kartenskript prüfen</td></tr>
+  <tr><td><code>engine_rejected_response</code></td><td>Engine lehnte eine Antwort ab</td><td>keine; Fehler im Generator</td></tr>
+  <tr><td><code>unsupported:*</code>, <code>unsupported_opponent:*</code></td><td>nicht unterstützte Entscheidung, z. B. Karte ansagen</td><td>keine</td></tr>
+</table></div>
+<p>Die <strong>Pruning-Regeln</strong> verkleinern den Suchraum anhand dokumentierter Annahmen und erscheinen in der Statistik als „Beschnitten“: Transpositionen (gleicher Zustand über verschiedene Wege), zu viele Karten (<code>too_many_cards</code>, das ist eine Definition und kein Abbruch), zu wenige Karten (<code>below_min_cards</code>) und redundante Karten (<code>redundant_cards</code>). Außerdem gilt: Zonen werden nur bei Link-Monstern verzweigt, die Kampfposition ist offene Angriffsposition, Setzen wird nur mit <code>allow_mset</code>/<code>allow_sset</code> probiert und gleiche Kopien zählen als eine Wahl. Die vollständige Liste steht in <a href="combo-generator-spec.md">combo-generator-spec.md</a>, Abschnitt 4.</p>
+
+<!-- ============================================================ -->
+<h2 id="einstellungen">5. Einstellungen</h2>
+
+<h3 id="quellen">Quellen und Vorrang</h3>
+<p>Alle Einstellungen des Generators stehen in einer TOML-Datei. Das Format ist das von <a href="../deepyugioh.example.toml">deepyugioh.example.toml</a>. Fehlende Schlüssel bekommen ihre Standardwerte, unbekannte Schlüssel in <code>[limits]</code> oder <code>[candidates]</code> führen zu einem Fehler.</p>
+<div class="table-wrap"><table>
+  <tr><th>Rang</th><th>Quelle</th><th>Gilt für</th></tr>
+  <tr><td>1</td><td>CLI-Optionen wie <code>--max-cards</code>, <code>--workers</code>, <code>--tiers</code></td><td>nur diesen Aufruf</td></tr>
+  <tr><td>2</td><td><code>--config DATEI.toml</code></td><td>ersetzt für diesen Aufruf die dauerhaften Einstellungen vollständig (keine Mischung)</td></tr>
+  <tr><td>3</td><td><code>deepyugioh.toml</code> im Projektordner (nicht versioniert, Pfad per <code>DEEPYUGIOH_SETTINGS</code> änderbar)</td><td>alle CLI-Befehle ohne <code>--config</code> und die Test-GUI</td></tr>
+  <tr><td>4</td><td>eingebaute Standardwerte</td><td>alles, was nirgends gesetzt ist</td></tr>
+</table></div>
+<div class="note"><p>In der Test-GUI verwenden Einzelsuche und globaler Lauf immer die Werte im Formular, auch ungespeicherte. Erst <strong>Speichern</strong> schreibt sie nach <code>deepyugioh.toml</code>. Dann nutzt auch die CLI sie. Ungültige Werte (z. B. Min. Karten größer als Max. Karten) werden beim Speichern und beim Start einer Suche abgelehnt.</p></div>
+<p>Die Spalte <em>Bereich</em> nennt die Grenzen, die das GUI-Formular erlaubt. Die Datei selbst prüft nur auf Widersprüche (<code>GeneratorConfig.check()</code>).</p>
+
+<h3 id="ref-limits">Suchgrenzen <code>[limits]</code> (pro Startaufbau)</h3>
+<div class="table-wrap"><table>
+  <tr><th>Schlüssel</th><th>GUI-Feld</th><th>CLI</th><th>Standard</th><th>Bereich</th><th>Wirkung</th></tr>
+  <tr><td><code>max_cards</code></td><td>Max. Karten pro Combo</td><td><code>--max-cards</code></td><td>5</td><td>1–60</td><td>Wie viele bestimmte Karten eine Combo höchstens braucht. Höhere Werte (6, 7 …) finden längere Combos, vergrößern den Suchraum aber stark.</td></tr>
+  <tr><td><code>min_cards</code></td><td>Min. Karten pro Combo</td><td><code>--min-cards</code></td><td>2</td><td>1–60</td><td>Darunter gilt ein Fund als Effekt einer einzelnen Karte und wird verworfen.</td></tr>
+  <tr><td><code>max_depth</code></td><td>Max. Entscheidungen pro Linie</td><td><code>--max-depth</code></td><td>80</td><td>1–100.000</td><td>Länge einer einzelnen Linie in Engine-Entscheidungen.</td></tr>
+  <tr><td><code>max_nodes</code></td><td>Max. Knoten pro Suche</td><td><code>--max-nodes</code></td><td>20.000</td><td>1–10⁹</td><td>Entscheidungspunkte, die eine Suche höchstens expandiert.</td></tr>
+  <tr><td><code>time_limit</code></td><td>Zeitlimit pro Suche (s)</td><td><code>--time-limit</code></td><td>120</td><td>0,1–604.800</td><td>Sekunden pro Startaufbau.</td></tr>
+  <tr><td><code>max_choices</code></td><td>Max. Optionen pro Kartenauswahl</td><td>–</td><td>128</td><td>1–10⁶</td><td>Mehr Optionen werden abgeschnitten, der Lauf gilt dann als unvollständig.</td></tr>
+  <tr><td><code>transpositions</code></td><td>Transpositionen erkennen</td><td>–</td><td>an</td><td>an/aus</td><td>Gleiche Spielstände über verschiedene Wege nur einmal durchsuchen. Ausschalten nur zur Fehlersuche, es kostet viel Zeit.</td></tr>
+  <tr><td><code>drop_redundant</code></td><td>Redundante Combos verwerfen</td><td>–</td><td>an</td><td>an/aus</td><td>Combos verwerfen, deren Nutzen eine echte Teilmenge ihrer Karten bereits erreicht.</td></tr>
+  <tr><td><code>allow_mset</code></td><td>Monster setzen durchsuchen</td><td rowspan="2"><code>--allow-set</code> (beide)</td><td>aus</td><td>an/aus</td><td>Verzweigt zusätzlich über verdecktes Setzen von Monstern.</td></tr>
+  <tr><td><code>allow_sset</code></td><td>Zauber/Fallen setzen durchsuchen</td><td>aus</td><td>an/aus</td><td>Verzweigt zusätzlich über Setzen von Zaubern und Fallen.</td></tr>
+</table></div>
+
+<h3 id="ref-candidates">Startaufbauten <code>[candidates]</code> (globale Suche)</h3>
+<div class="table-wrap"><table>
+  <tr><th>Schlüssel</th><th>GUI-Feld</th><th>CLI</th><th>Standard</th><th>Bereich</th><th>Wirkung</th></tr>
+  <tr><td><code>tiers</code></td><td>Stufen</td><td><code>generate --tiers</code></td><td>[1, 2, 3, 4]</td><td>1–4</td><td>Welche Stufen ein Lauf bearbeitet und in welcher Reihenfolge. Auf der GUI-Seite „Globaler Lauf“ lässt sich das pro Lauf überschreiben.</td></tr>
+  <tr><td><code>opponent_boards</code></td><td>Gegnerfelder</td><td>–</td><td>["empty", "standard"]</td><td>definierte Felder</td><td>Gegen welche Gegnerfelder jeder Kandidat gesucht wird. Jedes Feld verdoppelt die Kandidatenzahl.</td></tr>
+  <tr><td><code>max_deck_neighbors</code></td><td>Max. Deck-Nachbarn</td><td>–</td><td>15</td><td>0–200</td><td>Karten aus der Interaktions-Nachbarschaft im Deck. Wird gekappt, ist der Lauf unvollständig.</td></tr>
+  <tr><td><code>max_extra</code></td><td>Max. Extra Deck</td><td>–</td><td>15</td><td>0–200</td><td>Größe des Extra Decks im Startaufbau (im echten Spiel 15).</td></tr>
+  <tr><td><code>enablers</code></td><td>Hilfskarten ergänzen</td><td>–</td><td>an</td><td>an/aus</td><td>Generische Helfer (Foolish Burial, Monster Reborn, Soul Release) ergänzen, wenn Karten sie brauchen.</td></tr>
+</table></div>
+
+<h3 id="ref-run">Ausführung (oberste Ebene)</h3>
+<div class="table-wrap"><table>
+  <tr><th>Schlüssel</th><th>GUI-Feld</th><th>CLI</th><th>Standard</th><th>Wirkung</th></tr>
+  <tr><td><code>workers</code></td><td>Parallele Prozesse</td><td><code>generate --workers</code></td><td>1</td><td>Worker-Prozesse eines globalen Laufs. Einzelsuchen laufen immer in einem Prozess. Sinnvoll ist etwa die Zahl der Kerne.</td></tr>
+  <tr><td><code>validate</code></td><td>Combos per Replay validieren</td><td>–</td><td>an</td><td>Jede Linie wird in einem frischen Duell nachgespielt. Database 1 speichert nur validierte Combos; ohne Validierung wird also nichts gespeichert.</td></tr>
+</table></div>
+
+<h3 id="ref-boards">Gegnerfelder <code>[opponent_boards.NAME]</code></h3>
+<p>Gegnerfelder bestehen nur aus Normalen Monstern und Normalen Zaubern, damit der Gegner in unserem Zug nie etwas aktivieren kann. Eigene Felder werden in der Datei definiert. In der GUI wird nur ausgewählt, welche verwendet werden.</p>
+<pre><code>[opponent_boards.wall]
+cards = [
+  { card = "Mystical Elf", zone = "mzone", position = "faceup_defense" },
+  { card = "Pot of Greed", zone = "szone", position = "facedown" },
+  { card = "Mystical Elf", zone = "hand" },
+]
+
+[candidates]
+opponent_boards = ["empty", "standard", "wall"]</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Feld</th><th>Werte</th></tr>
+  <tr><td><code>card</code></td><td>englischer Kartenname oder Passcode</td></tr>
+  <tr><td><code>zone</code></td><td><code>mzone</code> (Standard), <code>szone</code>, <code>hand</code></td></tr>
+  <tr><td><code>position</code></td><td><code>faceup_attack</code> (Standard), <code>faceup_defense</code>, <code>facedown_defense</code>, <code>facedown</code></td></tr>
+</table></div>
+<p>Mitgeliefert: <code>empty</code> (nichts) und <code>standard</code> (Gene-Warped Warwolf offen, Pot of Greed gesetzt, zweimal Mystical Elf auf der Hand).</p>
+
+<h3 id="ref-other">Testmodus, Design und Umgebungsvariablen</h3>
+<div class="table-wrap"><table>
+  <tr><th>Einstellung</th><th>Standard</th><th>Bedeutung</th></tr>
+  <tr><td><code>test_mode</code> (oberste Ebene)</td><td><code>false</code></td><td>Schaltet Entwicklerwerkzeuge wie die Test-GUI frei. Setzen mit <code>deepyugioh testmode on|off</code>.</td></tr>
+  <tr><td><code>[gui] theme</code></td><td><code>"dark"</code></td><td>Design der GUI, <code>"dark"</code> oder <code>"light"</code>. Wird beim Umschalten in der GUI gespeichert.</td></tr>
+  <tr><td><code>DEEPYUGIOH_TEST_MODE</code></td><td>–</td><td><code>1</code>/<code>0</code> (auch true/false, on/off) überschreibt <code>test_mode</code>.</td></tr>
+  <tr><td><code>DEEPYUGIOH_SETTINGS</code></td><td>–</td><td>anderer Pfad für die Einstellungsdatei</td></tr>
+  <tr><td><code>DEEPYUGIOH_OCGCORE</code></td><td>–</td><td>anderer Pfad zu <code>libocgcore.so</code></td></tr>
+</table></div>
+<p>Die Datei wird atomar geschrieben. Beim Speichern aus der GUI bleiben <code>test_mode</code> und <code>[gui]</code> erhalten, ersetzt wird nur der Generator-Teil.</p>
+
+<!-- ============================================================ -->
+<h2 id="cli">6. Kommandozeile</h2>
+<p>Alle Befehle laufen mit <code>uv run deepyugioh BEFEHL</code>. Karten können per englischem Namen oder Passcode angegeben werden.</p>
+<div class="table-wrap"><table>
+  <tr><th>Befehl</th><th>Zweck</th><th>Wichtige Optionen</th></tr>
+  <tr><td><code>import-cards</code></td><td>Schritte 1–3: Karten importieren, Skripte analysieren, Interaktionsgraph bauen</td><td>–</td></tr>
+  <tr><td><code>plan</code></td><td>Stufen, Kandidatenzahlen und Abdeckung der globalen Suche</td><td>Suchgrenzen-Optionen, <code>--config</code></td></tr>
+  <tr><td><code>generate</code></td><td>globale Suche starten oder fortsetzen</td><td><code>--tiers</code>, <code>--max-jobs</code>, <code>--time-budget</code> (s), <code>--workers</code>, <code>--report-every</code> (50)</td></tr>
+  <tr><td><code>search</code></td><td>einen Startaufbau durchsuchen</td><td><code>--hand</code> (Pflicht), <code>--deck</code>, <code>--extra</code>, <code>--opponent</code> (<code>empty</code>), <code>--branch-zones</code>, <code>--show</code> (10), <code>--lines</code>, <code>--no-store</code></td></tr>
+  <tr><td><code>combos</code></td><td>Database 1 abfragen</td><td><code>--card</code>, <code>--positive</code>, <code>--max-cards</code>, <code>--limit</code> (50), <code>--lines</code></td></tr>
+  <tr><td><code>testmode</code></td><td>Testmodus anzeigen oder umschalten</td><td><code>on</code> / <code>off</code></td></tr>
+  <tr><td><code>gui</code></td><td>Test-GUI starten (nur im Testmodus)</td><td>–</td></tr>
+</table></div>
+<p>Suchgrenzen-Optionen für <code>plan</code>, <code>generate</code> und <code>search</code>: <code>--config</code>, <code>--max-cards</code>, <code>--min-cards</code>, <code>--max-depth</code>, <code>--max-nodes</code>, <code>--time-limit</code>, <code>--allow-set</code>.</p>
+<pre><code>uv run deepyugioh generate --tiers 1 2 --workers 8 --time-budget 3600
+uv run deepyugioh search --hand "Junk Synchron" "Foolish Burial" \
+    --deck Doppelwarrior Tuningware --extra "Junk Warrior" "Stardust Dragon" \
+    --opponent standard --lines
+uv run deepyugioh combos --positive opp_field_loss --lines</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="gui">7. Test-GUI</h2>
+<p>Die Test-GUI dient dem Feintuning des Generators und dem Auslesen der Ergebnisse. Sie bündelt alles, was sonst über mehrere CLI-Befehle verteilt ist: Einstellungen, Einzelsuchen, globale Läufe, Database 1 und die Auswertung der Abbruchgründe.</p>
+
+<h3 id="gui-start">Starten</h3>
+<pre><code>uv run deepyugioh testmode on      # Testmodus dauerhaft einschalten
+uv run deepyugioh gui
+uv run deepyugioh testmode off     # wieder ausschalten</code></pre>
+<p>Ohne aktiven Testmodus bricht <code>deepyugioh gui</code> mit einem Hinweis ab. Für einen einzelnen Start reicht <code>DEEPYUGIOH_TEST_MODE=1 uv run deepyugioh gui</code>.</p>
+
+<h3 id="gui-aufbau">Aufbau</h3>
+<div class="cards">
+  <div class="card"><h4>Seitenleiste</h4><p>Navigation zwischen den fünf Seiten, unten der Wechsel zwischen dunklem und hellem Design und der Pfad der Einstellungsdatei.</p></div>
+  <div class="card"><h4>Kopfleiste</h4><p>Auf jeder Seite sichtbar: Seitentitel, Status des globalen Laufs (Punkt und Text), Fortschrittsbalken, Live-Kennzahlen, <strong>Lauf starten</strong> und <strong>Stoppen</strong>.</p></div>
+  <div class="card"><h4>Statuszeile</h4><p>Ganz unten: Rückmeldung zur letzten Aktion, z. B. „Einstellungen gespeichert“ oder die Dauer einer Suche.</p></div>
+</div>
+<p>Der <strong>Status</strong> in der Kopfleiste zeigt <em>Bereit</em> (grau), <em>Globaler Lauf läuft</em> bzw. <em>Einzelsuche läuft</em> (blau), <em>Stoppt</em> (orange) und <em>Letzter Lauf beendet</em> (grün). Der Fortschrittsbalken füllt sich anhand von „Max. Suchen“ oder, falls nicht gesetzt, anhand des Zeitbudgets. Ist beides unbegrenzt, läuft er als Animation. Ein Klick auf die Zeile mit den Laufoptionen öffnet die Seite „Globaler Lauf“.</p>
+<figure>
+  <img src="images/gui-combos-hell.png" alt="Die Seite Combos im hellen Design">
+  <figcaption>Dieselbe Oberfläche im hellen Design. Umschalten unten in der Seitenleiste; die Wahl wird gespeichert.</figcaption>
+</figure>
+<p>Es läuft immer nur eine Suche gleichzeitig: Während einer Einzelsuche ist „Lauf starten“ gesperrt und umgekehrt. Engine-Arbeit läuft im Hintergrund, die Oberfläche bleibt bedienbar.</p>
+
+<h3 id="gui-einstellungen">Seite Einstellungen</h3>
+<figure>
+  <img src="images/gui-einstellungen.png" alt="Einstellungsseite mit den Karten Suchgrenzen, Ausführung und Startaufbauten">
+  <figcaption>Alle Parameter aus <a href="#einstellungen">Abschnitt 5</a> in drei Karten: Suchgrenzen, Ausführung, Startaufbauten.</figcaption>
+</figure>
+<ul>
+  <li><strong>Speichern</strong> prüft die Werte und schreibt sie nach <code>deepyugioh.toml</code>.</li>
+  <li><strong>Verwerfen</strong> lädt die gespeicherten Werte neu.</li>
+  <li><strong>Standardwerte</strong> trägt die eingebauten Standardwerte ein, ohne zu speichern. Selbst definierte Gegnerfelder bleiben erhalten.</li>
+  <li>Geänderte, noch nicht gespeicherte Werte zeigt der Hinweis <em>Ungespeicherte Änderungen</em>. Beim Schließen mit ungespeicherten Änderungen fragt die GUI nach.</li>
+</ul>
+
+<h3 id="gui-einzelsuche">Seite Einzelsuche</h3>
+<figure>
+  <img src="images/gui-einzelsuche.png" alt="Einzelsuche mit Kartensuche, Startaufbau, Ergebniskacheln, Combo-Liste und Details">
+  <figcaption>Ein Startaufbau mit Junk Synchron gegen das Standard-Gegnerfeld: drei validierte Combos, rechts die Details der markierten.</figcaption>
+</figure>
+<ol>
+  <li><strong>Karte suchen:</strong> ab zwei Zeichen erscheinen passende Namen, genaue Treffer zuerst. Mit <em>In Hand</em>, <em>In Deck</em>, <em>Ins Extra</em> (oder Doppelklick für die Hand) wird die Karte übernommen.</li>
+  <li><strong>Startaufbau:</strong> eine Karte pro Zeile, Name oder Passcode. <code>3x Name</code> fügt drei Kopien ein. Unbekannte Namen werden mit Vorschlägen gemeldet.</li>
+  <li><strong>Optionen:</strong> Gegnerfeld, <em>Zonen verzweigen</em> (nötig für Link-Monster), <em>In Database 1 speichern</em> (aus: reine Probe, nichts wird gespeichert).</li>
+  <li><strong>Ergebnis:</strong> Kacheln für Knoten, Replays, Dauer, Status, gefundene und validierte Combos und neue Einträge in Database 1. Darunter stehen Abbruchgründe mit der zuständigen Einstellung und die Beschneidung.</li>
+  <li><strong>Combo-Liste und Details:</strong> benötigte Karten nach Herkunft, Nutzenwerte, Endfeld beider Spieler, die Linie Schritt für Schritt und der Startaufbau. <em>Alle Engine-Schritte</em> blendet auch technische Schritte ein (Zonenwahl, Position, „keine Kette“).</li>
+</ol>
+<p>Die Einzelsuche verwendet die Werte des Einstellungsformulars. So lässt sich eine Grenze ändern und derselbe Aufbau sofort erneut durchsuchen.</p>
+
+<h3 id="gui-lauf">Seite Globaler Lauf</h3>
+<figure>
+  <img src="images/gui-globaler-lauf.png" alt="Globaler Lauf mit Laufoptionen, Kennzahlen, Abdeckungstabelle und farbigem Protokoll">
+  <figcaption>Laufender Lauf über Stufe 2: Kennzahlen, Abdeckung pro Stufe und Protokoll. Grüne Zeilen sind Suchen mit neuen Combos.</figcaption>
+</figure>
+<ul>
+  <li><strong>Laufoptionen:</strong> Stufen für diesen Lauf (vorbelegt aus den Einstellungen), <em>Max. Suchen</em> (Standard 100) und <em>Zeitbudget</em> in Sekunden. Leer heißt unbegrenzt.</li>
+  <li><strong>Lauf starten</strong> setzt immer am gespeicherten Stand fort. Bereits erledigte Kandidaten werden übersprungen.</li>
+  <li><strong>Stoppen</strong> startet keine neuen Suchen mehr. Laufende Suchen werden noch beendet und gespeichert, damit der nächste Lauf lückenlos fortsetzt. Das Gleiche passiert beim Schließen des Fensters während eines Laufs.</li>
+  <li><strong>Aktueller Lauf:</strong> Suchen, vollständig, unvollständig, Fehler, gefundene und neue Combos, Suchen pro Minute und Laufzeit, jede Sekunde aktualisiert.</li>
+  <li><strong>Abdeckung:</strong> pro Stufe die Zahl der Kandidaten, wie viele erledigt sind (absolut und in Prozent) und deren Ergebnis. Grundlage sind die Kandidaten-Einstellungen im Formular. Nach jedem Lauf wird sie aktualisiert.</li>
+  <li><strong>Protokoll:</strong> Start und Ende eines Laufs (blau), Suchen mit neuen Combos (grün), Fehler (rot) und jede 25. Suche. Es behält die letzten 3000 Zeilen.</li>
+</ul>
+<div class="warn">
+  <p><strong>Wichtig für das Tuning:</strong> Ein globaler Lauf durchsucht keinen Kandidaten zweimal. Neue Suchgrenzen oder Kandidaten-Einstellungen wirken nur auf Kandidaten, die noch nicht bearbeitet wurden. Zum Vergleichen von Einstellungen dient deshalb die Einzelsuche (siehe <a href="#tuning-ablauf">Feintuning</a>). Soll eine Stufe mit neuen Grenzen komplett neu durchsucht werden, muss <code>data/generator.sqlite</code> vorher beiseitegelegt werden. Database 1 bleibt davon unberührt, bekannte Combos werden nur verknüpft.</p>
+</div>
+
+<h3 id="gui-combos">Seite Combos (Database 1)</h3>
+<figure>
+  <img src="images/gui-combos.png" alt="Combo-Browser mit Kennzahlen, Filtern, Tabelle und Detailansicht">
+  <figcaption>Database 1 mit Kennzahlen, Filtern, Combo-Liste und Details der markierten Combo.</figcaption>
+</figure>
+<ul>
+  <li><strong>Kennzahlen:</strong> Combos, Läufe, Anteil vollständiger Läufe, durchschnittliche Dauer und Knotenzahl; darunter die Verteilung nach Kartenanzahl und nach Nutzen.</li>
+  <li><strong>Filter:</strong> Karte (Name oder Passcode, <kbd>Enter</kbd> startet), Nutzenkriterium, Max. Karten und Anzahl. Sortiert wird nach Kartenzahl, dann Linienlänge.</li>
+  <li><strong>Details:</strong> wie bei der Einzelsuche, zusätzlich alle Läufe, in denen die Combo gefunden wurde.</li>
+  <li><strong>In Einzelsuche öffnen</strong> überträgt den Startaufbau der Combo in die Einzelsuche.</li>
+  <li><strong>Als JSON exportieren</strong> speichert die angezeigte Liste mit Kartennamen, Nutzen, lesbarer Linie, Endfeld und Startaufbau.</li>
+  <li>Ein Klick auf eine Spaltenüberschrift sortiert die Tabelle, ein zweiter kehrt die Reihenfolge um. Das gilt für alle Tabellen der GUI.</li>
+</ul>
+
+<h3 id="gui-tuning">Seite Läufe &amp; Tuning</h3>
+<figure>
+  <img src="images/gui-laeufe-tuning.png" alt="Läufe und Tuning: Überblick, Tabelle der Abbruchgründe mit Einstellungen, Laufliste und Laufdetails">
+  <figcaption>Oben rechts der Kern des Feintunings: jeder Abbruchgrund mit betroffenen Läufen und der Einstellung, die ihn behebt. Unvollständige Läufe sind orange.</figcaption>
+</figure>
+<ul>
+  <li><strong>Überblick:</strong> Läufe, davon unvollständig und vollständig, durchschnittliche Dauer.</li>
+  <li><strong>Tuning:</strong> alle Abbruchgründe über alle gespeicherten Läufe, mit Zahl der betroffenen Läufe, Summe und zuständiger Einstellung, sortiert nach Häufigkeit. Darunter steht die Beschneidung durch Pruning-Regeln.</li>
+  <li><strong>Laufliste:</strong> die neuesten Läufe zuerst, filterbar nach „nur unvollständige“, Stufe und Anzahl.</li>
+  <li><strong>Laufdetails:</strong> Kandidat, Status, Knoten, Abbruchgründe mit Hinweis, Startaufbau und die Grenzen, mit denen dieser Lauf gesucht wurde.</li>
+  <li><strong>In Einzelsuche öffnen</strong> überträgt den Startaufbau des Laufs, um ihn mit anderen Grenzen erneut zu durchsuchen.</li>
+</ul>
+
+<h3 id="tuning-ablauf">Feintuning Schritt für Schritt</h3>
+<ol class="steps">
+  <li><strong>Probelauf.</strong> Auf „Globaler Lauf“ eine Stufe mit z. B. 200 Suchen laufen lassen.</li>
+  <li><strong>Abbruchgründe lesen.</strong> Auf „Läufe &amp; Tuning“ zeigt die Tuning-Tabelle, welche Grenze am häufigsten greift, z. B. <code>neighbourhood_truncated:deck</code>.</li>
+  <li><strong>Einzelfall prüfen.</strong> „Nur unvollständige“ aktivieren, einen Lauf wählen und <em>In Einzelsuche öffnen</em>.</li>
+  <li><strong>Grenze ändern und vergleichen.</strong> Die zuständige Einstellung erhöhen. Die Einzelsuche mit ausgeschaltetem „In Database 1 speichern“ erneut starten und Status, Dauer und Combos mit dem ursprünglichen Lauf vergleichen.</li>
+  <li><strong>Abwägen.</strong> Höhere Grenzen finden mehr, kosten aber Zeit pro Startaufbau und damit Wochen bei Stufe 3 und 4. Lohnt sich der Gewinn, die Werte <strong>speichern</strong>. Danach verwenden Folgeläufe und die CLI sie.</li>
+</ol>
+<p>Als Faustregel: <code>max_cards</code> (z. B. 5 → 6) vergrößert den Suchraum am stärksten. <code>time_limit</code> und <code>max_nodes</code> betreffen nur große Startaufbauten. Die Nachbarschaftsgrenzen ändern, welche Karten überhaupt im Startaufbau liegen.</p>
+
+<!-- ============================================================ -->
+<h2 id="daten">8. Datenhaltung</h2>
+<p>Alle erzeugten Daten liegen in <code>data/</code> und sind nicht versioniert.</p>
+<div class="table-wrap"><table>
+  <tr><th>Datei</th><th>Inhalt</th><th>Erzeugt von</th></tr>
+  <tr><td><code>cards.sqlite</code></td><td>Karten, analysierte Effekte, Referenzen und Interaktionsgraph</td><td><code>import-cards</code></td></tr>
+  <tr><td><code>combos.sqlite</code></td><td>Database 1: Combos und Läufe</td><td>Generator über <code>ComboSink</code></td></tr>
+  <tr><td><code>generator.sqlite</code></td><td>Fortschritt der globalen Suche: erledigte Kandidaten und Cursor pro Stufe</td><td>Generator (<code>JobStore</code>)</td></tr>
+</table></div>
+<h3>Database 1 (<code>combos.sqlite</code>)</h3>
+<div class="table-wrap"><table>
+  <tr><th>Tabelle</th><th>Inhalt</th></tr>
+  <tr><td><code>runs</code></td><td>ein Eintrag pro Suche: Startaufbau, Gegnerfeld, Grenzen, Knoten, Replays, Dauer, <code>complete</code>, Abbruchgründe, Beschneidung, gefundene und neue Combos, Commits von Engine, Skripten und Kartendaten, Graph-Version</td></tr>
+  <tr><td><code>combos</code></td><td>eine Zeile pro Combo-Identität (<code>signature</code>): benötigte Karten, Nutzen, Endfeld, Linie, Startaufbau, Erstfund</td></tr>
+  <tr><td><code>combo_cards</code></td><td>Index: welche Karte in welcher Rolle (Hand, Deck, Extra) mit wie vielen Kopien</td></tr>
+  <tr><td><code>combo_benefits</code></td><td>Index: positive Nutzenkriterien je Combo</td></tr>
+  <tr><td><code>combo_runs</code></td><td>in welchen Läufen eine Combo gefunden wurde</td></tr>
+  <tr><td><code>meta</code></td><td><code>schema_version</code>; eine Datenbank mit anderer Version wird nicht geöffnet (<code>SchemaMismatch</code>)</td></tr>
+</table></div>
+<h3>Fortsetzen (<code>generator.sqlite</code>)</h3>
+<p>Jede Stufe wird in fester Reihenfolge abgearbeitet. Ein <strong>Cursor</strong> pro Stufe und Graph-Version merkt sich, bis wohin alles erledigt ist. Weil parallele Worker in unterschiedlicher Reihenfolge fertig werden, werden Jobs hinter dem Cursor einzeln in <code>jobs</code> gespeichert und beim Fortsetzen übersprungen. Fehler in einem Kartenskript brechen den Lauf nicht ab, der Job wird mit <code>status = error</code> gespeichert.</p>
+
+<!-- ============================================================ -->
+<h2 id="schnittstellen">9. Schnittstellen</h2>
+<p>Der Generator hängt nur von den Verträgen in <code>deepyugioh.contracts</code> ab. Was in <code>deepyugioh.generator.__all__</code> und <code>deepyugioh.contracts</code> steht, ist Schnittstelle; alles andere ist intern. Die vollständige Beschreibung steht in <a href="schnittstellen.md">schnittstellen.md</a>.</p>
+<pre><code>from deepyugioh.generator import ComboGenerator, GeneratorConfig
+from deepyugioh import settings
+
+gen = ComboGenerator(pool, sink, settings.generator_config(), graph=graph, pool_factory=CardStore)
+gen.search(setup)                              # ein Startaufbau -> SearchReport
+gen.run(tiers=[1, 2], max_jobs=10_000,         # global, fortsetzbar, parallel
+        time_budget=3600, progress=listener,
+        should_stop=event.is_set)              # z. B. Stopp-Knopf
+gen.coverage()                                 # Abdeckung pro Stufe</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Vertrag</th><th>Richtung</th><th>Implementierung</th></tr>
+  <tr><td><code>CardPool</code></td><td>Kartendaten → Generator</td><td><code>cards.store.CardStore</code></td></tr>
+  <tr><td><code>InteractionGraph</code></td><td>Graph → Startaufbau-Generator</td><td><code>cards.graph.CardGraph</code></td></tr>
+  <tr><td><code>CandidateSource</code></td><td>austauschbarer Startaufbau-Generator</td><td><code>generator.candidates.GraphCandidateSource</code></td></tr>
+  <tr><td><code>ComboSink</code></td><td>Generator → Database 1</td><td><code>repository.combo_db.ComboRepository</code></td></tr>
+  <tr><td><code>ComboReader</code></td><td>Database 1 → Analyzer (Phase 2)</td><td><code>repository.combo_db.ComboRepository</code></td></tr>
+  <tr><td><code>ProgressListener</code></td><td>Generator → Fortschrittsanzeige (CLI, GUI)</td><td><code>on_job(JobReport)</code></td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="gui-technik">10. GUI-Technik und Vorlage für weitere Stufen</h2>
+<p>Die GUI des Combo Generators ist das Vorbild für die GUIs der folgenden Stufen (Analyzer, Quality Filter, Deckbau). Dieser Abschnitt beschreibt ihren Aufbau und die Regeln, an die sich weitere GUIs halten sollen, damit alle gleich aussehen und sich gleich bedienen lassen.</p>
+
+<h3>Bausteine</h3>
+<div class="table-wrap"><table>
+  <tr><th>Datei</th><th>Inhalt</th><th>Wiederverwendbar für weitere Stufen</th></tr>
+  <tr><td><code>gui/theme.py</code></td><td><code>Theme</code>: Farbpaletten (dunkel, hell), Schriften, alle ttk-Stile, Registrierung klassischer Tk-Widgets (Text, Listbox, Canvas, Tabellen-Tags) für den Designwechsel</td><td>ja, unverändert</td></tr>
+  <tr><td><code>gui/app.py</code></td><td>Hülle (<code>App</code>, <code>Sidebar</code>, <code>Header</code>), Bausteine (<code>card</code>, <code>Tile</code>, <code>tile_row</code>, <code>make_tree</code>, <code>make_text</code>, <code>set_text</code>, <code>NavItem</code>) und die fünf Seiten</td><td>Hülle und Bausteine ja, Seiten sind stufenspezifisch</td></tr>
+  <tr><td><code>gui/format.py</code></td><td>reine Textaufbereitung ohne tkinter (Combo-, Lauf- und Statistiktexte, Export, Tuning-Hinweise); per pytest testbar</td><td>Muster ja, Inhalte stufenspezifisch</td></tr>
+  <tr><td><code>settings.py</code></td><td>dauerhafte Einstellungen, Testmodus, Design</td><td>ja; neue Stufen bekommen eigene Tabellen in <code>deepyugioh.toml</code></td></tr>
+</table></div>
+
+<h3>Seitenmodell</h3>
+<p>Jede Seite ist eine Klasse mit <code>frame</code> (Hintergrund <code>Page.TFrame</code>). Seiten mit Datenbankinhalt haben zusätzlich <code>loaded</code> und <code>refresh()</code>: Sie laden beim ersten Öffnen automatisch, danach über ihre Schaltflächen. Seiten werden in <code>PAGES</code> (Schlüssel, Titel, Untertitel) eingetragen; Seitenleiste und Kopfleiste ergeben sich daraus.</p>
+
+<h3>Nebenläufigkeit</h3>
+<ul>
+  <li>Engine-Arbeit läuft über <code>App.task(label, work, done)</code> in einem Hintergrund-Thread. <code>work</code> läuft im Thread, <code>done(result)</code> im Tk-Hauptthread. Fehler erscheinen als Dialog und in der Statuszeile.</li>
+  <li><code>exclusive=True</code> (Standard) erlaubt nur eine Aufgabe gleichzeitig. Lesende Nebenaufgaben wie die Abdeckung laufen mit <code>exclusive=False</code>.</li>
+  <li>Aus anderen Threads wird nur über <code>App.post(fn, *args)</code> auf die Oberfläche zugegriffen. Eine Queue wird alle 100 ms im Hauptthread abgearbeitet.</li>
+  <li>SQLite-Verbindungen gehören zu ihrem Thread: Jeder Hintergrund-Thread öffnet eigene <code>CardStore</code>- und Repository-Instanzen. Die Instanzen in <code>App</code> sind nur für den Hauptthread.</li>
+  <li>Lange Läufe haben einen Stopp über <code>should_stop</code>, der laufende Arbeit sauber zu Ende bringt.</li>
+</ul>
+
+<h3>Gestaltungsregeln</h3>
+<ul>
+  <li>Inhalte stehen in Karten (<code>card(parent, titel, untertitel)</code>) auf dem Seitenhintergrund, Kennzahlen in Kacheln (<code>Tile</code>).</li>
+  <li>Farben nur über das Theme: Akzent (Blau) für primäre Aktionen und neue Ergebnisse, Grün für vollständig/erfolgreich, Orange für unvollständig/Warnung, Rot für Fehler und Stoppen.</li>
+  <li>Eine primäre Schaltfläche (<code>Accent.TButton</code>) pro Karte; Stoppen ist <code>Danger.TButton</code>.</li>
+  <li>Tabellen über <code>make_tree</code> (Streifen, Sortierung), Detailtexte über <code>make_text</code> und <code>set_text(..., highlight=True)</code>.</li>
+  <li>Klassische Tk-Widgets immer mit <code>theme.register(widget, art)</code> anmelden, sonst folgen sie dem Designwechsel nicht.</li>
+  <li>Keine Sonderzeichen wie ∞, → oder … in Beschriftungen: Das Tk der uv-Umgebung nutzt X11-Kernschriften ohne Kantenglättung, denen diese Zeichen fehlen. Statusanzeigen werden gezeichnet (Canvas), nicht als Zeichen geschrieben.</li>
+  <li>Jede Entwickler-GUI startet nur im Testmodus (Prüfung in der CLI und in <code>run_gui()</code>).</li>
+  <li>Die GUI nutzt nur öffentliche Schnittstellen der Module (z. B. <code>ComboGenerator</code>, <code>ComboReader</code>), keine Interna.</li>
+</ul>
+<p class="muted">Sobald eine zweite Stufe eine GUI bekommt, lohnt es sich, Hülle und Bausteine aus <code>gui/app.py</code> in ein gemeinsames Modul (etwa <code>gui/shell.py</code>) zu verschieben, sodass jede Stufe nur ihre Seiten beisteuert.</p>
+
+<!-- ============================================================ -->
+<h2 id="tests">11. Tests</h2>
+<p><code>uv run pytest</code> führt alle Tests aus, auch gegen die echte Engine. Fehlen Engine oder Kartendatenbank, werden die betroffenen Tests übersprungen.</p>
+<div class="table-wrap"><table>
+  <tr><th>Datei</th><th>Prüft</th></tr>
+  <tr><td><code>test_contracts.py</code></td><td>Startaufbau: Reihenfolge unabhängig, Serialisierung, Prüfung der Gegnerkarten</td></tr>
+  <tr><td><code>test_effects.py</code></td><td>statische Skriptanalyse</td></tr>
+  <tr><td><code>test_actions.py</code></td><td>Aufzählung der Engine-Antworten, Kopien, Summenauswahl, Zonenregeln, Nutzenvergleich</td></tr>
+  <tr><td><code>test_combo_search.py</code></td><td>Suche, Nutzen, Validierung an bekannten Combos</td></tr>
+  <tr><td><code>test_generator.py</code></td><td>Modulschnittstelle, Startaufbauten, Speichern, fortsetzbare Läufe, TOML</td></tr>
+  <tr><td><code>test_settings.py</code></td><td>dauerhafte Einstellungen, Testmodus-Sperre der GUI, Design, Kartensuche, Lauf-Auswertung, Stopp eines Laufs, Textaufbereitung der GUI</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="grenzen-offen">12. Bekannte Grenzen</h2>
+<ul>
+  <li><strong>Einstellungen und Fortsetzen:</strong> Bereits erledigte Kandidaten werden nicht erneut durchsucht, auch wenn sich Grenzen oder Kandidaten-Einstellungen geändert haben (siehe <a href="#gui-lauf">Globaler Lauf</a>).</li>
+  <li><strong>Neue Kartenskripte</strong> ändern die Graph-Version und damit die Kandidatenreihenfolge. Erledigte Kandidaten werden anhand ihrer ID trotzdem übersprungen; ein Modus „nur Kandidaten mit neuen Karten“ fehlt noch.</li>
+  <li><strong>Karte ansagen</strong> wird nicht unterstützt; solche Äste werden als <code>unsupported</code> protokolliert.</li>
+  <li><strong>Spalteneffekte</strong> und die Zonenwahl für Zauber/Fallen werden nicht durchsucht.</li>
+  <li><strong>Verzweigung per Replay</strong> kostet etwa 15 ms pro Alternative; schnelleres Verzweigen per <code>fork(2)</code> ist geplant.</li>
+  <li><strong>Austauschbare Helfer:</strong> Combos mit einem Helfer-Vertreter werden noch nicht gegen alle Karten derselben Rolle validiert.</li>
+  <li><strong>GUI-Schrift:</strong> ohne Kantenglättung, siehe <a href="#gui-technik">GUI-Technik</a>.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="lizenz">13. Lizenz</h2>
+<p>ygopro-core und die CardScripts stehen unter der AGPL-3.0. Weil dieses Projekt die Engine einbindet, gilt die AGPL auch für das Gesamtsystem, sobald es weitergegeben oder als Netzwerkdienst betrieben wird. Yu-Gi-Oh! ist eine Marke von Shueisha und Konami; dieses Projekt ist damit nicht verbunden.</p>
+</main>
+</div>
+</body>
+</html>

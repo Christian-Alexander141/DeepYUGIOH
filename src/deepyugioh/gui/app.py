@@ -1,13 +1,14 @@
 """Test GUI: fine-tune the Combo Generator and read its results.
 
 Only available in test mode (`deepyugioh testmode on`), started with
-`deepyugioh gui`. Tabs:
+`deepyugioh gui`. Layout: sidebar navigation, a header that always shows the
+global run (start/stop, progress, live numbers) and these pages:
 
     Einstellungen   all generator settings, saved permanently in deepyugioh.toml
     Einzelsuche     search one start setup with the current settings
-    Globaler Lauf   resumable global search with stop button and coverage
+    Globaler Lauf   options, live numbers, coverage and log of the global search
     Combos          Database 1: filter, inspect, export
-    Läufe           every stored search, why it stopped early, which setting to change
+    Läufe & Tuning  every stored search, why it stopped early, which setting to change
 
 Engine work runs in a background thread; every thread opens its own SQLite
 connections. Results come back through a queue polled by the Tk main loop.
@@ -31,6 +32,7 @@ from deepyugioh.contracts.combos import BENEFIT_CRITERIA, ComboRecord
 from deepyugioh.contracts.setups import StartSetup
 from deepyugioh.generator import TIERS, CandidateConfig, GeneratorConfig, SearchLimits
 from deepyugioh.gui import format as fmt
+from deepyugioh.gui.theme import Theme
 
 
 class TestModeRequired(RuntimeError):
@@ -57,8 +59,14 @@ CANDIDATE_NUMBERS = [
     ("max_deck_neighbors", "Max. Deck-Nachbarn", "Karten aus der Interaktions-Nachbarschaft im Deck", 0, 200),
     ("max_extra", "Max. Extra Deck", "Größe des Extra Decks im Startaufbau", 0, 200),
 ]
-_DEFAULT_LIMITS = SearchLimits()
-_DEFAULT_CANDIDATES = CandidateConfig()
+
+PAGES = (
+    ("settings", "Einstellungen", "Alle Parameter des Combo Generators, dauerhaft in deepyugioh.toml"),
+    ("search", "Einzelsuche", "Einen Startaufbau mit den aktuellen Einstellungen durchsuchen"),
+    ("global", "Globaler Lauf", "Fortsetzbare Suche über alle generierten Startaufbauten"),
+    ("combos", "Combos", "Database 1: gefundene und per Replay validierte Combos"),
+    ("runs", "Läufe & Tuning", "Warum Suchen unvollständig waren und welche Einstellung hilft"),
+)
 
 
 def _parse_number(raw: str, kind: type, label: str, lo, hi):
@@ -77,19 +85,79 @@ def _optional(raw: str, kind: type, label: str):
     return None if not raw else _parse_number(raw, kind, label, 0 if kind is float else 1, 10**12)
 
 
-# ---- small widget helpers ----------------------------------------------------
-def make_tree(parent, columns: list[tuple[str, str, int]], height: int = 12) -> tuple[ttk.Frame, ttk.Treeview]:
-    """Treeview with scrollbar; click on a heading sorts by that column."""
+def _display_path(path) -> str:
+    """Relative to the project root if inside it (shorter, no home directory in screenshots)."""
+    from deepyugioh import paths
+
+    try:
+        return str(path.resolve().relative_to(paths.ROOT.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _duration(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+# ---- widget helpers ----------------------------------------------------------------
+def card(parent, title: str | None = None, subtitle: str | None = None, padding=16) -> ttk.Frame:
+    """Bordered surface with optional title. Put content into `.body`, extra header widgets into `.head`."""
+    outer = ttk.Frame(parent, style="Card.TFrame", padding=padding)
+    outer.head = ttk.Frame(outer)
+    if title:
+        outer.head.pack(fill="x", pady=(0, 12))
+        ttk.Label(outer.head, text=title, style="CardTitle.TLabel").pack(side="left")
+        if subtitle:
+            ttk.Label(outer.head, text=subtitle, style="Muted.TLabel").pack(side="left", padx=10)
+    outer.body = ttk.Frame(outer)
+    outer.body.pack(fill="both", expand=True)
+    return outer
+
+
+class Tile:
+    """Key figure: large value, small label."""
+
+    def __init__(self, parent, label: str, value: str = "-"):
+        self.frame = ttk.Frame(parent, style="Tile.TFrame", padding=(14, 10))
+        self.value = ttk.Label(self.frame, text=value, style="TileValue.TLabel")
+        self.value.pack(anchor="w")
+        ttk.Label(self.frame, text=label, style="TileLabel.TLabel").pack(anchor="w")
+
+    def set(self, value, tone: str | None = None):
+        style = f"{tone.title()}.TileValue.TLabel" if tone else "TileValue.TLabel"
+        self.value.configure(text=str(value), style=style)
+
+
+def tile_row(parent, specs: list[tuple[str, str]]) -> tuple[ttk.Frame, dict[str, Tile]]:
+    frame = ttk.Frame(parent)
+    tiles = {}
+    for col, (key, label) in enumerate(specs):
+        tiles[key] = Tile(frame, label)
+        tiles[key].frame.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 8, 0))
+        frame.columnconfigure(col, weight=1, uniform="tiles")
+    return frame, tiles
+
+
+def make_tree(parent, theme: Theme, columns: list[tuple[str, str, int]], height: int = 12) -> tuple[ttk.Frame, ttk.Treeview]:
+    """Treeview with scrollbar and row stripes; click on a heading sorts by that column."""
     frame = ttk.Frame(parent)
     tree = ttk.Treeview(frame, columns=[c[0] for c in columns], show="headings", height=height, selectmode="browse")
     for key, heading, width in columns:
-        tree.heading(key, text=heading, command=lambda k=key: _sort(tree, k))
+        tree.heading(key, text=heading, anchor="w" if width >= 120 else "center", command=lambda k=key: _sort(tree, k))
         tree.column(key, width=width, stretch=width >= 200, anchor="w" if width >= 120 else "center")
     sb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=sb.set)
     tree.pack(side="left", fill="both", expand=True)
     sb.pack(side="right", fill="y")
+    theme.register(tree, "tree")
     return frame, tree
+
+
+def restripe(tree: ttk.Treeview):
+    for n, item in enumerate(tree.get_children("")):
+        tags = [t for t in tree.item(item, "tags") if t != "odd"]
+        tree.item(item, tags=tags + (["odd"] if n % 2 else []))
 
 
 def _sort(tree: ttk.Treeview, col: str):
@@ -106,28 +174,179 @@ def _sort(tree: ttk.Treeview, col: str):
     for n, (_, item) in enumerate(rows):
         tree.move(item, "", n)
     tree._sort_state = None if reverse else col
+    restripe(tree)
 
 
-def make_text(parent, height: int = 10, width: int = 80) -> tuple[ttk.Frame, tk.Text]:
+def make_text(parent, theme: Theme, height: int = 10, width: int = 80, wrap: str = "none") -> tuple[ttk.Frame, tk.Text]:
     frame = ttk.Frame(parent)
-    text = tk.Text(frame, height=height, width=width, wrap="none", font="TkFixedFont", undo=False)
+    text = tk.Text(frame, height=height, width=width, wrap=wrap, font=theme.fonts["mono"], undo=False)
+    theme.register(text, "text")
     sy = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
-    sx = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
-    text.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+    text.configure(yscrollcommand=sy.set)
     text.grid(row=0, column=0, sticky="nsew")
     sy.grid(row=0, column=1, sticky="ns")
-    sx.grid(row=1, column=0, sticky="ew")
+    if wrap == "none":
+        sx = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
+        text.configure(xscrollcommand=sx.set)
+        sx.grid(row=1, column=0, sticky="ew")
     frame.rowconfigure(0, weight=1)
     frame.columnconfigure(0, weight=1)
     return frame, text
 
 
-def set_text(widget: tk.Text, content: str, readonly: bool = True):
+def set_text(widget: tk.Text, content: str, readonly: bool = True, highlight: bool = False):
+    """Replace the content. highlight: headings (first line, lines ending in ':') and warnings get colours."""
     widget.configure(state="normal")
     widget.delete("1.0", "end")
     widget.insert("1.0", content)
+    if highlight:
+        for n, line in enumerate(content.splitlines(), start=1):
+            if line and not line[0].isspace() and (n == 1 or line.rstrip().endswith(":")):
+                widget.tag_add("h", f"{n}.0", f"{n}.end")
+            elif "UNVOLLSTÄNDIG" in line or line.lstrip().startswith("->"):
+                widget.tag_add("warn", f"{n}.0", f"{n}.end")
     if readonly:
         widget.configure(state="disabled")
+
+
+class NavItem:
+    """Sidebar entry: accent bar + label, hover and active state."""
+
+    def __init__(self, parent, theme: Theme, text: str, command: Callable[[], None]):
+        self.theme, self.active, self.hover = theme, False, False
+        self.row = tk.Frame(parent, cursor="hand2")
+        self.bar = tk.Frame(self.row, width=4)
+        self.bar.pack(side="left", fill="y")
+        self.label = tk.Label(self.row, text=text, anchor="w", padx=18, pady=10, font=theme.fonts["nav"], cursor="hand2")
+        self.label.pack(side="left", fill="x", expand=True)
+        for w in (self.row, self.label):
+            w.bind("<Button-1>", lambda _e: command())
+            w.bind("<Enter>", lambda _e: self._hover(True))
+            w.bind("<Leave>", lambda _e: self._hover(False))
+
+    def _hover(self, on: bool):
+        self.hover = on
+        self.paint()
+
+    def paint(self, _pal=None):
+        p = self.theme.pal
+        bg = p["sidebar_active"] if self.active else p["sidebar_hover"] if self.hover else p["sidebar"]
+        self.row.configure(bg=bg)
+        self.bar.configure(bg=p["accent"] if self.active else bg)
+        self.label.configure(bg=bg, fg="#ffffff" if self.active else p["sidebar_fg"])
+
+
+class Sidebar:
+    def __init__(self, app: "App"):
+        t = app.theme
+        self.app = app
+        self.frame = tk.Frame(app.root, width=230)
+        self.frame.pack(side="left", fill="y")
+        self.frame.pack_propagate(False)
+        self.brand = tk.Label(self.frame, text="DeepYUGIOH", font=t.fonts["brand"], anchor="w", padx=22)
+        self.brand.pack(fill="x", pady=(24, 0))
+        self.sub = tk.Label(self.frame, text="Combo Generator", font=t.fonts["base"], anchor="w", padx=22)
+        self.sub.pack(fill="x")
+        self.badge = tk.Label(self.frame, text="TESTMODUS", font=t.fonts["bold"], padx=8, pady=2)
+        self.badge.pack(anchor="w", padx=22, pady=(12, 22))
+        self.items: dict[str, NavItem] = {}
+        for key, title, _ in PAGES:
+            item = NavItem(self.frame, t, title, lambda k=key: app.show(k))
+            item.row.pack(fill="x")
+            self.items[key] = item
+
+        self.path = tk.Label(self.frame, text=f"Einstellungen:\n{_display_path(settings.settings_path())}", font=t.fonts["small"],
+                             justify="left", anchor="w", wraplength=190, padx=22)
+        self.path.pack(side="bottom", fill="x", pady=(6, 18))
+        self.theme_item = NavItem(self.frame, t, "", self.app.toggle_theme)
+        self.theme_item.row.pack(side="bottom", fill="x")
+        t.on_change(self.paint)
+        self.paint()
+
+    def select(self, key: str):
+        for k, item in self.items.items():
+            item.active = k == key
+            item.paint()
+
+    def paint(self, _pal=None):
+        p = self.app.theme.pal
+        for w in (self.frame, self.brand, self.sub, self.path):
+            w.configure(bg=p["sidebar"])
+        self.brand.configure(fg="#ffffff")
+        self.sub.configure(fg=p["sidebar_fg"])
+        self.path.configure(fg="#6b7385")
+        self.badge.configure(bg=p["warning"], fg="#111111")
+        self.theme_item.label.configure(text="Helles Design" if self.app.theme.name == "dark" else "Dunkles Design")
+        for item in (*self.items.values(), self.theme_item):
+            item.paint()
+
+
+class Header:
+    """Page title + global run controls, visible on every page."""
+
+    def __init__(self, app: "App", parent):
+        self.app = app
+        t = app.theme
+        frame = ttk.Frame(parent, style="Header.TFrame", padding=(24, 14))
+        frame.pack(fill="x")
+        ttk.Separator(parent).pack(fill="x")
+
+        left = ttk.Frame(frame, style="Header.TFrame")
+        left.pack(side="left", fill="y")
+        self.title = ttk.Label(left, style="Title.TLabel")
+        self.title.pack(anchor="w")
+        self.subtitle = ttk.Label(left, style="Muted.TLabel")
+        self.subtitle.pack(anchor="w", pady=(2, 0))
+
+        self.stop_btn = ttk.Button(frame, text="Stoppen", style="Danger.TButton", command=app.stop_run)
+        self.stop_btn.pack(side="right", padx=(8, 0))
+        self.start_btn = ttk.Button(frame, text="Lauf starten", style="Accent.TButton", command=app.start_run)
+        self.start_btn.pack(side="right", padx=(16, 0))
+
+        run = ttk.Frame(frame, style="Header.TFrame")
+        run.pack(side="right")
+        top = ttk.Frame(run, style="Header.TFrame")
+        top.pack(fill="x")
+        self.dot = tk.Canvas(top, width=16, height=16)
+        t.register(self.dot, "canvas")
+        self.dot.create_oval(2, 2, 14, 14, outline="", tags="dot")
+        self.dot.pack(side="left", padx=(0, 6))
+        self.state = ttk.Label(top, text="Bereit", style="CardTitle.TLabel")
+        self.state.pack(side="left")
+        self.metrics = ttk.Label(top, text="", style="Muted.TLabel")
+        self.metrics.pack(side="right", padx=(12, 0))
+        self.bar = ttk.Progressbar(run, length=360, mode="determinate", maximum=100)
+        self.bar.pack(fill="x", pady=(6, 4))
+        self.summary = ttk.Label(run, text="", style="Muted.TLabel", cursor="hand2")
+        self.summary.pack(anchor="w")
+        self.summary.bind("<Button-1>", lambda _e: app.show("global"))
+        t.on_change(lambda _p: self.refresh())
+
+    def set_page(self, title: str, subtitle: str):
+        self.title.configure(text=title)
+        self.subtitle.configure(text=subtitle)
+
+    def refresh(self):
+        app, p = self.app, self.app.theme.pal
+        g = getattr(app, "global_tab", None)
+        if g is None:  # still building
+            return
+        if g.running:
+            stopping = g.stop_event is not None and g.stop_event.is_set()
+            state, color = ("Stoppt, laufende Suchen werden fertig", p["warning"]) if stopping else ("Globaler Lauf läuft", p["accent"])
+        elif app.busy:
+            state, color = f"{app.busy} läuft", p["accent"]
+        elif g.last_report is not None:
+            state, color = "Letzter Lauf beendet", p["success"]
+        else:
+            state, color = "Bereit", p["muted"]
+        self.dot.itemconfigure("dot", fill=color)
+        self.state.configure(text=state)
+        self.metrics.configure(text=g.metrics_text())
+        self.summary.configure(text=g.options_text() + "   (Optionen: Globaler Lauf)")
+        self.start_btn.configure(state="disabled" if app.busy else "normal")
+        stoppable = g.running and not (g.stop_event and g.stop_event.is_set())
+        self.stop_btn.configure(state="normal" if stoppable else "disabled")
 
 
 # ---- application ---------------------------------------------------------------
@@ -137,12 +356,14 @@ class App:
         from deepyugioh.repository.combo_db import ComboRepository
 
         self.root = root
+        self.theme = Theme(root, settings.gui_theme())
         self.store = CardStore()          # main thread only
         self.repo = ComboRepository()     # main thread only (reading)
         self.queue: queue.Queue = queue.Queue()
         self.busy: str | None = None
         self.closing = False
         self.busy_listeners: list[Callable[[], None]] = []
+        self.current = "settings"
 
         try:
             self.saved = settings.generator_config()
@@ -150,38 +371,64 @@ class App:
             messagebox.showerror("Einstellungen", f"{settings.settings_path()} ist ungültig:\n{e}\n\nEs gelten die Standardwerte.")
             self.saved = GeneratorConfig()
 
-        root.title("DeepYUGIOH - Testmodus: Combo Generator")
-        root.geometry("1400x900")
-        root.minsize(1000, 650)
-        style = ttk.Style(root)
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-        style.configure("Hint.TLabel", foreground="#666666")
-        style.configure("Dirty.TLabel", foreground="#b35c00")
-        style.configure("Head.TLabel", font=("TkDefaultFont", 11, "bold"))
+        root.title("DeepYUGIOH - Testmodus")
+        root.geometry("1480x940")
+        root.minsize(1150, 700)
 
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill="both", expand=True, padx=6, pady=(6, 0))
+        self.sidebar = Sidebar(self)
+        main = ttk.Frame(root, style="Page.TFrame")
+        main.pack(side="left", fill="both", expand=True)
+        self.header = Header(self, main)
+        self.content = ttk.Frame(main, style="Page.TFrame")
+        self.content.pack(fill="both", expand=True)
+        self.content.rowconfigure(0, weight=1)
+        self.content.columnconfigure(0, weight=1)
+        bar = ttk.Frame(main, style="Page.TFrame", padding=(24, 0, 24, 8))
+        bar.pack(fill="x")
+        self.status = tk.StringVar(value="bereit")
+        ttk.Label(bar, textvariable=self.status, style="PageMuted.TLabel").pack(side="left")
+
         self.settings_tab = SettingsTab(self)
         self.search_tab = SearchTab(self)
         self.global_tab = GlobalTab(self)
         self.combos_tab = CombosTab(self)
         self.runs_tab = RunsTab(self)
-        for tab, title in ((self.settings_tab, "Einstellungen"), (self.search_tab, "Einzelsuche"),
-                           (self.global_tab, "Globaler Lauf"), (self.combos_tab, "Combos (Database 1)"),
-                           (self.runs_tab, "Läufe & Tuning")):
-            self.notebook.add(tab.frame, text=title)
-        self.notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
-
-        bar = ttk.Frame(root)
-        bar.pack(fill="x", padx=6, pady=4)
-        self.status = tk.StringVar(value="bereit")
-        ttk.Label(bar, textvariable=self.status).pack(side="left")
-        ttk.Label(bar, text=f"Testmodus aktiv · Einstellungen: {settings.settings_path()}",
-                  style="Hint.TLabel").pack(side="right")
+        self.pages = {"settings": self.settings_tab, "search": self.search_tab, "global": self.global_tab,
+                      "combos": self.combos_tab, "runs": self.runs_tab}
+        for page in self.pages.values():
+            page.frame.grid(row=0, column=0, sticky="nsew")
+        self.busy_listeners.append(self.header.refresh)
+        self.show("settings")
+        self.header.refresh()
 
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.after(100, self._poll)
+
+    # ---- navigation ------------------------------------------------------------------
+    def show(self, key: str):
+        self.current = key
+        page = self.pages[key]
+        page.frame.tkraise()
+        self.sidebar.select(key)
+        _, title, subtitle = next(p for p in PAGES if p[0] == key)
+        self.header.set_page(title, subtitle)
+        if getattr(page, "loaded", True) is False:  # first visit; afterwards via the refresh buttons
+            page.loaded = True
+            page.refresh()
+
+    def toggle_theme(self):
+        name = self.theme.toggle()
+        try:
+            settings.set_gui_theme(name)
+        except OSError as e:
+            self.status.set(f"Design nicht gespeichert: {e}")
+
+    # ---- global run (header buttons) -----------------------------------------------------
+    def start_run(self):
+        self.global_tab.start()
+
+    def stop_run(self):
+        self.global_tab.stop()
 
     # ---- configuration -------------------------------------------------------
     def config(self) -> GeneratorConfig:
@@ -193,7 +440,7 @@ class App:
             return self.config()
         except ValueError as e:
             messagebox.showerror("Ungültige Einstellungen", str(e))
-            self.notebook.select(self.settings_tab.frame)
+            self.show("settings")
             return None
 
     # ---- background work -----------------------------------------------------
@@ -208,7 +455,7 @@ class App:
         if exclusive:
             self.busy = label
             self._busy_changed()
-        self.status.set(f"{label} läuft …")
+        self.status.set(f"{label} läuft ...")
         t0 = time.perf_counter()
 
         def target():
@@ -252,13 +499,6 @@ class App:
         except tk.TclError:  # window already destroyed
             pass
 
-    def _tab_changed(self, _event):
-        tab = self.notebook.nametowidget(self.notebook.select())
-        for t in (self.combos_tab, self.runs_tab):
-            if t.frame is tab and not t.loaded:  # first visit; afterwards via the refresh buttons
-                t.loaded = True
-                t.refresh()
-
     def close(self):
         if self.settings_tab.dirty and not messagebox.askyesno(
             "Ungespeicherte Einstellungen", "Die Einstellungen wurden geändert, aber nicht gespeichert. Trotzdem beenden?"
@@ -272,21 +512,25 @@ class App:
                 return
             self.closing = True
             self.global_tab.stop()
-            self.status.set("wird beendet, sobald die laufenden Suchen fertig sind …")
+            self.status.set("wird beendet, sobald die laufenden Suchen fertig sind ...")
             return
         self.root.destroy()
 
-    # ---- cross-tab actions -----------------------------------------------------
+    # ---- cross-page actions -----------------------------------------------------
     def open_in_search(self, setup: StartSetup):
         self.search_tab.load_setup(setup)
-        self.notebook.select(self.search_tab.frame)
+        self.show("search")
 
 
-# ---- tab: settings -----------------------------------------------------------------
+def _page(app: App) -> ttk.Frame:
+    return ttk.Frame(app.content, style="Page.TFrame", padding=(24, 18, 24, 12))
+
+
+# ---- page: settings -----------------------------------------------------------------
 class SettingsTab:
     def __init__(self, app: App):
         self.app = app
-        self.frame = ttk.Frame(app.notebook, padding=10)
+        self.frame = _page(app)
         self.vars: dict[str, tk.Variable] = {}
         self.tier_vars: dict[int, tk.BooleanVar] = {}
         self.board_vars: dict[str, tk.BooleanVar] = {}
@@ -295,64 +539,68 @@ class SettingsTab:
         self.dirty = False
         self._loading = False
 
-        head = ttk.Frame(self.frame)
-        head.pack(fill="x")
-        ttk.Label(head, text="Generator-Einstellungen", style="Head.TLabel").pack(side="left")
-        self.dirty_label = ttk.Label(head, text="", style="Dirty.TLabel")
-        self.dirty_label.pack(side="left", padx=12)
-        ttk.Button(head, text="Standardwerte", command=self.defaults).pack(side="right")
-        ttk.Button(head, text="Verwerfen", command=self.reload).pack(side="right", padx=4)
-        ttk.Button(head, text="Speichern", command=self.save).pack(side="right")
-        ttk.Label(self.frame, style="Hint.TLabel", text=(
+        bar = ttk.Frame(self.frame, style="Page.TFrame")
+        bar.pack(fill="x", pady=(0, 14))
+        ttk.Label(bar, style="PageMuted.TLabel", text=(
             "Einzelsuche und globaler Lauf verwenden immer die Werte in diesem Formular. "
-            "„Speichern“ macht sie dauerhaft – auch für `deepyugioh generate`, `plan` und `search`."
-        )).pack(fill="x", pady=(2, 10))
+            "Speichern macht sie dauerhaft, auch für deepyugioh generate, plan und search."
+        )).pack(side="left")
+        ttk.Button(bar, text="Standardwerte", command=self.defaults).pack(side="right")
+        ttk.Button(bar, text="Verwerfen", command=self.reload).pack(side="right", padx=8)
+        ttk.Button(bar, text="Speichern", style="Accent.TButton", command=self.save).pack(side="right")
+        self.dirty_label = ttk.Label(bar, text="", style="Dirty.PageMuted.TLabel")
+        self.dirty_label.pack(side="right", padx=14)
 
-        cols = ttk.Frame(self.frame)
+        cols = ttk.Frame(self.frame, style="Page.TFrame")
         cols.pack(fill="both", expand=True)
-        left = ttk.LabelFrame(cols, text="Suchgrenzen (pro Startaufbau)", padding=8)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        right = ttk.Frame(cols)
-        right.pack(side="left", fill="both", expand=True)
+        cols.columnconfigure(0, weight=1, uniform="cols")
+        cols.columnconfigure(1, weight=1, uniform="cols")
+        left_col = ttk.Frame(cols, style="Page.TFrame")
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        right_col = ttk.Frame(cols, style="Page.TFrame")
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
+        limits = card(left_col, "Suchgrenzen", "pro Startaufbau")
+        limits.pack(fill="x")
+        body = limits.body
         row = 0
         for key, label, hint, lo, hi in LIMIT_NUMBERS:
-            row = self._number(left, row, key, label, hint, lo, hi, float if key == "time_limit" else int)
-        ttk.Separator(left).grid(row=row, column=0, columnspan=3, sticky="ew", pady=6)
+            row = self._number(body, row, key, label, hint, lo, hi, float if key == "time_limit" else int)
+        ttk.Separator(body).grid(row=row, column=0, columnspan=2, sticky="ew", pady=12)
         row += 1
         for key, label, hint in LIMIT_FLAGS:
-            row = self._flag(left, row, key, label, hint)
-        left.columnconfigure(2, weight=1)
+            row = self._flag(body, row, key, label, hint)
+        body.columnconfigure(1, weight=1)
 
-        cand = ttk.LabelFrame(right, text="Startaufbauten (globale Suche)", padding=8)
+        run = card(left_col, "Ausführung")
+        run.pack(fill="x", pady=(16, 0))
+        row = self._number(run.body, 0, "workers", "Parallele Prozesse",
+                           f"Nur globaler Lauf; dieser Rechner hat {os.cpu_count()} Kerne", 1, max(64, os.cpu_count() or 1), int)
+        self._flag(run.body, row, "validate", "Combos per Replay validieren", "Nur validierte Combos kommen in Database 1")
+        run.body.columnconfigure(1, weight=1)
+
+        cand = card(right_col, "Startaufbauten", "globale Suche")
         cand.pack(fill="x")
-        ttk.Label(cand, text="Stufen").grid(row=0, column=0, sticky="nw", pady=2)
-        tiers = ttk.Frame(cand)
-        tiers.grid(row=0, column=1, columnspan=2, sticky="w")
+        body = cand.body
+        ttk.Label(body, text="Stufen", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        tiers = ttk.Frame(body)
+        tiers.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 10))
         for tier, desc in TIERS.items():
             v = self.tier_vars[tier] = tk.BooleanVar()
             v.trace_add("write", self._changed)
-            ttk.Checkbutton(tiers, text=f"{tier}: {desc}", variable=v).pack(anchor="w")
-        ttk.Label(cand, text="Gegnerfelder").grid(row=1, column=0, sticky="nw", pady=(8, 2))
-        self.boards_frame = ttk.Frame(cand)
-        self.boards_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 2))
-        row = 2
-        for key, label, hint, lo, hi in CANDIDATE_NUMBERS:
-            row = self._number(cand, row, key, label, hint, lo, hi, int)
-        row = self._flag(cand, row, "enablers", "Hilfskarten ergänzen", "Z. B. Foolish Burial, wenn eine Karte im Friedhof wirkt")
-        cand.columnconfigure(2, weight=1)
-
-        run = ttk.LabelFrame(right, text="Ausführung", padding=8)
-        run.pack(fill="x", pady=(8, 0))
-        row = self._number(run, 0, "workers", "Parallele Prozesse", f"Nur globaler Lauf; dieser Rechner hat {os.cpu_count()} Kerne",
-                           1, max(64, os.cpu_count() or 1), int)
-        self._flag(run, row, "validate", "Combos per Replay validieren", "Nur validierte Combos kommen in Database 1")
-        run.columnconfigure(2, weight=1)
-
-        ttk.Label(right, style="Hint.TLabel", wraplength=520, justify="left", text=(
+            ttk.Checkbutton(tiers, text=f"Stufe {tier}: {desc}", variable=v).pack(anchor="w")
+        ttk.Label(body, text="Gegnerfelder", style="CardTitle.TLabel").grid(row=2, column=0, columnspan=2, sticky="w")
+        self.boards_frame = ttk.Frame(body)
+        self.boards_frame.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 2))
+        ttk.Label(body, style="Muted.TLabel", wraplength=560, justify="left", text=(
             "Gegnerfelder selbst werden in der Einstellungsdatei unter [opponent_boards.NAME] definiert "
             "(Format siehe deepyugioh.example.toml); hier wird nur ausgewählt, welche verwendet werden."
-        )).pack(fill="x", pady=(10, 0))
+        )).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        row = 5
+        for key, label, hint, lo, hi in CANDIDATE_NUMBERS:
+            row = self._number(body, row, key, label, hint, lo, hi, int)
+        self._flag(body, row, "enablers", "Hilfskarten ergänzen", "Z. B. Foolish Burial, wenn eine Karte im Friedhof wirkt")
+        body.columnconfigure(1, weight=1)
 
         self.fill(app.saved)
 
@@ -360,24 +608,29 @@ class SettingsTab:
     def _number(self, parent, row, key, label, hint, lo, hi, kind):
         v = self.vars[key] = tk.StringVar()
         v.trace_add("write", self._changed)
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
-        inc = 1 if kind is int else 5.0
-        ttk.Spinbox(parent, textvariable=v, from_=lo, to=hi, increment=inc, width=12).grid(row=row, column=1, sticky="w", padx=6)
-        ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky="w")
+        cell = ttk.Frame(parent)
+        cell.grid(row=row, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Spinbox(cell, textvariable=v, from_=lo, to=hi, increment=1 if kind is int else 5.0, width=11).pack(side="left")
+        text = ttk.Frame(cell)
+        text.pack(side="left", padx=12, fill="x")
+        ttk.Label(text, text=label).pack(anchor="w")
+        ttk.Label(text, text=hint, style="Muted.TLabel").pack(anchor="w")
         self._kinds[key] = (kind, label, lo, hi)
         return row + 1
 
     def _flag(self, parent, row, key, label, hint):
         v = self.vars[key] = tk.BooleanVar()
         v.trace_add("write", self._changed)
-        ttk.Checkbutton(parent, text=label, variable=v).grid(row=row, column=0, columnspan=2, sticky="w", pady=2)
-        ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky="w")
+        cell = ttk.Frame(parent)
+        cell.grid(row=row, column=0, columnspan=2, sticky="ew", pady=3)
+        ttk.Checkbutton(cell, text=label, variable=v).pack(side="left")
+        ttk.Label(cell, text=hint, style="Muted.TLabel").pack(side="left", padx=10)
         return row + 1
 
     def _changed(self, *_):
         if not self._loading:
             self.dirty = True
-            self.dirty_label.configure(text="● ungespeicherte Änderungen")
+            self.dirty_label.configure(text="Ungespeicherte Änderungen")
 
     def _set_clean(self):
         self.dirty = False
@@ -456,7 +709,7 @@ class SettingsTab:
     def defaults(self):
         self.fill(GeneratorConfig().with_(opponent_boards={**GeneratorConfig().opponent_boards, **self.boards}))
         self.app.post(self._changed)
-        self.app.status.set("Standardwerte eingetragen – noch nicht gespeichert")
+        self.app.status.set("Standardwerte eingetragen, noch nicht gespeichert")
 
 
 # ---- shared: combo list with detail view ---------------------------------------------
@@ -467,25 +720,25 @@ class ComboView:
         self.app = app
         self.runs_for = runs_for
         self.combos: list[ComboRecord] = []
-        self.frame = ttk.Panedwindow(parent, orient="horizontal")
+        self.frame = ttk.Panedwindow(parent, orient="horizontal", style="Card.TPanedwindow")
         left = ttk.Frame(self.frame)
-        tree_frame, self.tree = make_tree(left, [
-            ("n", "#", 50), ("cards", "Karten", 55), ("actions", "Aktionen", 65), ("opp", "Gegner", 80),
-            ("names", "Benötigte Karten", 330), ("benefit", "Nutzen", 220),
+        tree_frame, self.tree = make_tree(left, app.theme, [
+            ("n", "#", 55), ("cards", "Karten", 60), ("actions", "Aktionen", 70), ("opp", "Gegner", 85),
+            ("names", "Benötigte Karten", 330), ("benefit", "Nutzen", 210),
         ])
-        tree_frame.pack(fill="both", expand=True)
+        tree_frame.pack(fill="both", expand=True, padx=(0, 8))
         self.tree.bind("<<TreeviewSelect>>", self._select)
         self.frame.add(left, weight=3)
 
         right = ttk.Frame(self.frame)
         opts = ttk.Frame(right)
-        opts.pack(fill="x")
+        opts.pack(fill="x", padx=(8, 0), pady=(0, 6))
         self.all_steps = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opts, text="Alle Engine-Schritte zeigen", variable=self.all_steps, command=self._select).pack(side="left")
-        self.open_btn = ttk.Button(opts, text="Startaufbau in Einzelsuche öffnen", command=self._open, state="disabled")
+        ttk.Checkbutton(opts, text="Alle Engine-Schritte", variable=self.all_steps, command=self._select).pack(side="left")
+        self.open_btn = ttk.Button(opts, text="In Einzelsuche öffnen", command=self._open, state="disabled")
         self.open_btn.pack(side="right")
-        text_frame, self.text = make_text(right, height=20, width=70)
-        text_frame.pack(fill="both", expand=True, pady=(4, 0))
+        text_frame, self.text = make_text(right, app.theme, height=20, width=64)
+        text_frame.pack(fill="both", expand=True, padx=(8, 0))
         self.frame.add(right, weight=2)
 
     def set(self, combos: list[ComboRecord]):
@@ -498,6 +751,7 @@ class ComboView:
                 c.id if c.id is not None else i + 1, c.card_count, visible, c.setup.opponent.name,
                 fmt.names(c.cards, name), ", ".join(c.positive),
             ))
+        restripe(self.tree)
         set_text(self.text, "" if combos else "Keine Combos.")
         self.open_btn.configure(state="disabled")
         if combos:
@@ -512,7 +766,7 @@ class ComboView:
         if c is None:
             return
         runs = self.runs_for(c.id) if self.runs_for and c.id is not None else None
-        set_text(self.text, fmt.combo_text(c, self.app.store.name, all_steps=self.all_steps.get(), runs=runs))
+        set_text(self.text, fmt.combo_text(c, self.app.store.name, all_steps=self.all_steps.get(), runs=runs), highlight=True)
         self.open_btn.configure(state="normal")
 
     def _open(self):
@@ -521,63 +775,72 @@ class ComboView:
             self.app.open_in_search(c.setup)
 
 
-# ---- tab: single search ------------------------------------------------------------------
+# ---- page: single search ------------------------------------------------------------------
 class SearchTab:
     def __init__(self, app: App):
         self.app = app
-        self.frame = ttk.Frame(app.notebook, padding=8)
-        top = ttk.Frame(self.frame)
+        self.frame = _page(app)
+        top = ttk.Frame(self.frame, style="Page.TFrame")
         top.pack(fill="x")
 
         # card finder
-        finder = ttk.LabelFrame(top, text="Karte suchen", padding=6)
+        finder = card(top, "Karte suchen")
         finder.pack(side="left", fill="y")
         self.query = tk.StringVar()
-        entry = ttk.Entry(finder, textvariable=self.query, width=34)
-        entry.pack(fill="x")
+        ttk.Entry(finder.body, textvariable=self.query, width=36).pack(fill="x")
         self.query.trace_add("write", lambda *_: self._find())
-        self.results = tk.Listbox(finder, height=8, width=40, exportselection=False)
-        self.results.pack(fill="both", expand=True, pady=4)
+        self.results = tk.Listbox(finder.body, height=7, width=40, exportselection=False, font=app.theme.fonts["base"])
+        app.theme.register(self.results, "listbox")
+        self.results.pack(fill="both", expand=True, pady=8)
         self.results.bind("<Double-Button-1>", lambda _e: self._add("hand"))
-        btns = ttk.Frame(finder)
+        btns = ttk.Frame(finder.body)
         btns.pack(fill="x")
-        for target, label in (("hand", "→ Hand"), ("deck", "→ Deck"), ("extra", "→ Extra")):
-            ttk.Button(btns, text=label, width=8, command=lambda t=target: self._add(t)).pack(side="left", padx=1)
+        for target, label in (("hand", "In Hand"), ("deck", "In Deck"), ("extra", "Ins Extra")):
+            ttk.Button(btns, text=label, command=lambda t=target: self._add(t)).pack(side="left", padx=(0, 6))
         self.found: list = []
 
         # setup
-        setup = ttk.LabelFrame(top, text="Startaufbau (eine Karte pro Zeile, Name oder Passcode, „3x Name“ für Kopien)", padding=6)
-        setup.pack(side="left", fill="both", expand=True, padx=6)
+        setup = card(top, "Startaufbau", "eine Karte pro Zeile, Name oder Passcode, 3x Name für Kopien")
+        setup.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        body = setup.body
         self.lists: dict[str, tk.Text] = {}
         for col, (key, label) in enumerate((("hand", "Hand"), ("deck", "Deck"), ("extra", "Extra Deck"))):
-            ttk.Label(setup, text=label).grid(row=0, column=col, sticky="w")
-            box = tk.Text(setup, height=9, width=30, undo=True)
-            box.grid(row=1, column=col, sticky="nsew", padx=2)
-            setup.columnconfigure(col, weight=1)
+            ttk.Label(body, text=label, style="Muted.TLabel").grid(row=0, column=col, sticky="w", padx=(0 if col == 0 else 10, 0))
+            box = tk.Text(body, height=8, width=30, undo=True, font=app.theme.fonts["base"])
+            app.theme.register(box, "text")
+            box.grid(row=1, column=col, sticky="nsew", padx=(0 if col == 0 else 10, 0), pady=(4, 0))
+            body.columnconfigure(col, weight=1, uniform="lists")
             self.lists[key] = box
-        opts = ttk.Frame(setup)
-        opts.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        opts = ttk.Frame(body)
+        opts.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(12, 0))
         ttk.Label(opts, text="Gegnerfeld").pack(side="left")
         self.opponent = tk.StringVar(value="empty")
         self.opponent_box = ttk.Combobox(opts, textvariable=self.opponent, state="readonly", width=14)
-        self.opponent_box.pack(side="left", padx=4)
+        self.opponent_box.pack(side="left", padx=8)
         self.branch_zones = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opts, text="Zonen verzweigen (Link)", variable=self.branch_zones).pack(side="left", padx=8)
+        ttk.Checkbutton(opts, text="Zonen verzweigen (Link)", variable=self.branch_zones).pack(side="left", padx=10)
         self.store_results = tk.BooleanVar(value=False)
-        ttk.Checkbutton(opts, text="Ergebnis in Database 1 speichern", variable=self.store_results).pack(side="left", padx=8)
-        ttk.Button(opts, text="Leeren", command=self.clear).pack(side="right")
-        self.start_btn = ttk.Button(opts, text="Suche starten", command=self.start)
-        self.start_btn.pack(side="right", padx=4)
+        ttk.Checkbutton(opts, text="In Database 1 speichern", variable=self.store_results).pack(side="left", padx=10)
+        self.start_btn = ttk.Button(opts, text="Suche starten", style="Accent.TButton", command=self.start)
+        self.start_btn.pack(side="right")
+        ttk.Button(opts, text="Leeren", command=self.clear).pack(side="right", padx=8)
 
-        self.summary = tk.StringVar(value="Noch keine Suche.")
-        ttk.Label(self.frame, textvariable=self.summary, justify="left", wraplength=1300).pack(fill="x", pady=6)
-        self.view = ComboView(app, self.frame)
+        result = card(self.frame, "Ergebnis")
+        result.pack(fill="both", expand=True, pady=(16, 0))
+        row, self.tiles = tile_row(result.body, [
+            ("nodes", "Knoten"), ("replays", "Replays"), ("time", "Dauer"), ("status", "Status"),
+            ("found", "Combos gefunden"), ("valid", "validiert"), ("new", "neu in Database 1"),
+        ])
+        row.pack(fill="x")
+        self.summary = ttk.Label(result.body, text="Noch keine Suche.", style="Muted.TLabel", justify="left", wraplength=1150)
+        self.summary.pack(fill="x", pady=10)
+        self.view = ComboView(app, result.body)
         self.view.frame.pack(fill="both", expand=True)
         app.busy_listeners.append(self._busy)
         self.config_changed()
 
     def config_changed(self):
-        boards = list(self.app.settings_tab.boards) if hasattr(self.app, "settings_tab") else list(self.app.saved.opponent_boards)
+        boards = list(self.app.settings_tab.boards)
         self.opponent_box.configure(values=boards)
         if self.opponent.get() not in boards and boards:
             self.opponent.set(boards[0])
@@ -588,18 +851,18 @@ class SearchTab:
     def _find(self):
         self.found = self.app.store.search(self.query.get(), limit=60) if len(self.query.get().strip()) >= 2 else []
         self.results.delete(0, "end")
-        for card in self.found:
-            self.results.insert("end", f"{card.name}  [{card.code}]")
+        for card_ in self.found:
+            self.results.insert("end", f"{card_.name}  [{card_.code}]")
 
     def _add(self, target: str):
         sel = self.results.curselection()
         if not sel:
             return
-        card = self.found[sel[0]]
+        card_ = self.found[sel[0]]
         box = self.lists[target]
         content = box.get("1.0", "end").rstrip("\n")
         box.delete("1.0", "end")
-        box.insert("1.0", (content + "\n" if content else "") + card.name)
+        box.insert("1.0", (content + "\n" if content else "") + card_.name)
 
     def clear(self):
         for box in self.lists.values():
@@ -643,8 +906,6 @@ class SearchTab:
             messagebox.showerror("Startaufbau", str(e).strip("'\""))
             return
         store = self.store_results.get()
-        self.summary.set(f"Suche läuft … (Zeitlimit {cfg.limits.time_limit:g}s, max. {cfg.limits.max_nodes} Knoten, "
-                         f"{cfg.limits.min_cards}–{cfg.limits.max_cards} Karten)")
 
         def work():
             from deepyugioh.cards.store import CardStore
@@ -653,23 +914,39 @@ class SearchTab:
 
             return ComboGenerator(CardStore(), ComboRepository() if store else None, cfg).search(setup)
 
-        self.app.task("Einzelsuche", work, self._done)
+        if not self.app.task("Einzelsuche", work, self._done):
+            return
+        for tile in self.tiles.values():
+            tile.set("-")
+        self.tiles["status"].set("läuft", "accent")
+        self.summary.configure(text=f"Suche läuft: Zeitlimit {cfg.limits.time_limit:g}s, max. {cfg.limits.max_nodes} Knoten, "
+                                    f"{cfg.limits.min_cards} bis {cfg.limits.max_cards} Karten")
 
     def _done(self, rep):
         run = rep.run
-        status = "vollständig" if run.complete else f"UNVOLLSTÄNDIG: {fmt.reasons(run.incomplete)}"
+        t = self.tiles
+        t["nodes"].set(run.nodes)
+        t["replays"].set(run.replays)
+        t["time"].set(f"{run.elapsed_s:.2f}s")
+        if run.complete:
+            t["status"].set("vollständig", "success")
+        else:
+            t["status"].set("unvollständig", "warning")
+        t["found"].set(run.combos_found)
+        t["valid"].set(len(rep.combos), "success" if rep.combos else None)
+        t["new"].set(rep.new_combos if rep.run_id is not None else "-", "accent" if rep.new_combos else None)
         hints = [fmt.INCOMPLETE_HINTS[k] for k in run.incomplete if k in fmt.INCOMPLETE_HINTS]
-        text = (f"{run.nodes} Knoten, {run.replays} Replays, {run.elapsed_s:.2f}s – {status}"
-                f"{'  →  ' + '; '.join(hints) if hints else ''}\n"
-                f"Beschnitten: {fmt.reasons(run.pruned)}\n"
-                f"{run.combos_found} Combos gefunden, {len(rep.combos)} per Replay validiert")
+        text = f"Abbruchgründe: {fmt.reasons(run.incomplete)}"
+        if hints:
+            text += f"  ({'; '.join(hints)})"
+        text += f"     Beschnitten: {fmt.reasons(run.pruned)}"
         if rep.run_id is not None:
-            text += f" · gespeichert als Lauf #{rep.run_id}, {rep.new_combos} neu in Database 1"
-        self.summary.set(text)
+            text += f"     Gespeichert als Lauf #{rep.run_id}"
+        self.summary.configure(text=text)
         self.view.set(rep.combos)
 
 
-# ---- tab: global run -----------------------------------------------------------------
+# ---- page: global run -----------------------------------------------------------------
 class _Listener:
     def __init__(self, app: App, on_job):
         self.app, self.on_job_main = app, on_job
@@ -683,53 +960,88 @@ class GlobalTab:
 
     def __init__(self, app: App):
         self.app = app
-        self.frame = ttk.Frame(app.notebook, padding=8)
+        self.frame = _page(app)
         self.stop_event: threading.Event | None = None
+        self.running = False
+        self.last_report = None
+        self.stats = self._empty_stats()
+        self.t0 = 0.0
+        self.run_max_jobs: int | None = None
+        self.run_budget: float | None = None
+        self._indeterminate = False
 
-        opts = ttk.LabelFrame(self.frame, text="Lauf", padding=6)
+        opts = card(self.frame, "Laufoptionen", "ein Lauf setzt immer am gespeicherten Stand fort")
         opts.pack(fill="x")
-        ttk.Label(opts, text="Stufen").pack(side="left")
+        row = opts.body
+        ttk.Label(row, text="Stufen").pack(side="left")
         self.tier_vars = {t: tk.BooleanVar() for t in TIERS}
         for t, v in self.tier_vars.items():
-            ttk.Checkbutton(opts, text=str(t), variable=v).pack(side="left")
-        ttk.Label(opts, text="Max. Suchen").pack(side="left", padx=(16, 2))
+            ttk.Checkbutton(row, text=str(t), variable=v).pack(side="left", padx=(8, 0))
+        ttk.Label(row, text="Max. Suchen").pack(side="left", padx=(24, 6))
         self.max_jobs = tk.StringVar(value="100")
-        ttk.Entry(opts, textvariable=self.max_jobs, width=9).pack(side="left")
-        ttk.Label(opts, text="Zeitbudget (s)").pack(side="left", padx=(12, 2))
+        ttk.Entry(row, textvariable=self.max_jobs, width=9).pack(side="left")
+        ttk.Label(row, text="Zeitbudget (s)").pack(side="left", padx=(18, 6))
         self.time_budget = tk.StringVar(value="")
-        ttk.Entry(opts, textvariable=self.time_budget, width=9).pack(side="left")
-        ttk.Label(opts, text="leer = unbegrenzt", style="Hint.TLabel").pack(side="left", padx=6)
-        self.stop_btn = ttk.Button(opts, text="Stoppen", command=self.stop, state="disabled")
+        ttk.Entry(row, textvariable=self.time_budget, width=9).pack(side="left")
+        ttk.Label(row, text="leer = unbegrenzt", style="Muted.TLabel").pack(side="left", padx=8)
+        for v in (*self.tier_vars.values(), self.max_jobs, self.time_budget):
+            v.trace_add("write", lambda *_: self.app.header.refresh())
+        self.stop_btn = ttk.Button(row, text="Stoppen", style="Danger.TButton", command=self.stop, state="disabled")
         self.stop_btn.pack(side="right")
-        self.start_btn = ttk.Button(opts, text="Lauf starten / fortsetzen", command=self.start)
-        self.start_btn.pack(side="right", padx=4)
+        self.start_btn = ttk.Button(row, text="Lauf starten", style="Accent.TButton", command=self.start)
+        self.start_btn.pack(side="right", padx=8)
 
-        self.counters = tk.StringVar(value="Kein Lauf aktiv. Ein Lauf setzt immer am gespeicherten Stand fort.")
-        ttk.Label(self.frame, textvariable=self.counters).pack(fill="x", pady=6)
+        live = card(self.frame, "Aktueller Lauf")
+        live.pack(fill="x", pady=(16, 0))
+        tiles, self.tiles = tile_row(live.body, [
+            ("jobs", "Suchen"), ("complete", "vollständig"), ("incomplete", "unvollständig"), ("error", "Fehler"),
+            ("found", "Combos gefunden"), ("new", "neu in Database 1"), ("rate", "Suchen pro Minute"), ("time", "Laufzeit"),
+        ])
+        tiles.pack(fill="x")
+        self.bar = ttk.Progressbar(live.body, mode="determinate", maximum=100)
+        self.bar.pack(fill="x", pady=(12, 0))
+        self._show_stats()
 
-        panes = ttk.Panedwindow(self.frame, orient="vertical")
-        panes.pack(fill="both", expand=True)
-        cov = ttk.LabelFrame(panes, text="Abdeckung der globalen Suche", padding=4)
-        bar = ttk.Frame(cov)
-        bar.pack(fill="x")
-        ttk.Button(bar, text="Aktualisieren", command=self.refresh_coverage).pack(side="left")
-        ttk.Label(bar, text="mit den Kandidaten-Einstellungen im Formular (Stufen, Gegnerfelder, Nachbarn)",
-                  style="Hint.TLabel").pack(side="left", padx=8)
-        tree_frame, self.coverage = make_tree(cov, [
-            ("tier", "Stufe", 50), ("total", "Kandidaten", 95), ("done", "erledigt", 80), ("pct", "%", 60),
-            ("complete", "vollständig", 85), ("incomplete", "unvollst.", 80), ("error", "Fehler", 60),
-            ("found", "Combos", 70), ("new", "neu", 60), ("desc", "Beschreibung", 400),
-        ], height=5)
-        tree_frame.pack(fill="both", expand=True, pady=(4, 0))
-        panes.add(cov, weight=1)
+        lower = ttk.Frame(self.frame, style="Page.TFrame")
+        lower.pack(fill="both", expand=True, pady=(16, 0))
+        lower.columnconfigure(0, weight=1)
+        lower.rowconfigure(1, weight=1)
+        cov = card(lower, "Abdeckung", "mit den Kandidaten-Einstellungen im Formular")
+        cov.grid(row=0, column=0, sticky="ew")
+        ttk.Button(cov.head, text="Aktualisieren", command=self.refresh_coverage).pack(side="right")
+        tree_frame, self.coverage = make_tree(cov.body, app.theme, [
+            ("tier", "Stufe", 55), ("total", "Kandidaten", 100), ("done", "erledigt", 85), ("pct", "%", 70),
+            ("complete", "vollständig", 90), ("incomplete", "unvollst.", 85), ("error", "Fehler", 65),
+            ("found", "Combos", 75), ("new", "neu", 65), ("desc", "Beschreibung", 400),
+        ], height=4)
+        tree_frame.pack(fill="both", expand=True)
 
-        logf = ttk.LabelFrame(panes, text="Protokoll (Suchen mit neuen Combos, Fehler und jede 25. Suche)", padding=4)
-        text_frame, self.log = make_text(logf, height=14)
+        logc = card(lower, "Protokoll", "Suchen mit neuen Combos, Fehler und jede 25. Suche")
+        logc.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
+        ttk.Button(logc.head, text="Leeren", command=lambda: set_text(self.log, "")).pack(side="right")
+        text_frame, self.log = make_text(logc.body, app.theme, height=8)
         text_frame.pack(fill="both", expand=True)
         self.log.configure(state="disabled")
-        panes.add(logf, weight=3)
         app.busy_listeners.append(self._busy)
         self.config_changed()
+
+    # ---- state shown in the header -------------------------------------------------------
+    @staticmethod
+    def _empty_stats() -> dict:
+        return {"jobs": 0, "complete": 0, "incomplete": 0, "error": 0, "found": 0, "new": 0}
+
+    def options_text(self) -> str:
+        tiers = [str(t) for t, v in self.tier_vars.items() if v.get()]
+        jobs = self.max_jobs.get().strip() or "unbegrenzt"
+        budget = f"{self.time_budget.get().strip()}s" if self.time_budget.get().strip() else "unbegrenzt"
+        return f"Stufen {', '.join(tiers) or '-'}  |  max. {jobs} Suchen  |  Zeitbudget {budget}"
+
+    def metrics_text(self) -> str:
+        if not self.running and self.last_report is None:
+            return ""
+        s = self.stats
+        elapsed = (time.perf_counter() - self.t0) if self.running else self.last_report.elapsed_s
+        return f"{s['jobs']} Suchen  |  {s['new']} neue Combos  |  {_duration(elapsed)}"
 
     def config_changed(self):
         for t, v in self.tier_vars.items():
@@ -737,20 +1049,67 @@ class GlobalTab:
 
     def _busy(self):
         if not self.app.busy:
+            self.running = False
             self.stop_event = None  # also after a failed run
-        running = self.stop_event is not None
+            self._update_progress()
+        stoppable = self.running and not (self.stop_event and self.stop_event.is_set())
         self.start_btn.configure(state="disabled" if self.app.busy else "normal")
-        self.stop_btn.configure(state="normal" if running else "disabled")
+        self.stop_btn.configure(state="normal" if stoppable else "disabled")
+        self.app.header.refresh()
 
-    def _append(self, line: str):
+    def _append(self, line: str, tag: str | None = None):
         self.log.configure(state="normal")
-        self.log.insert("end", line + "\n")
+        self.log.insert("end", line + "\n", (tag,) if tag else ())
         lines = int(self.log.index("end-1c").split(".")[0])
         if lines > self.MAX_LOG_LINES:
             self.log.delete("1.0", f"{lines - self.MAX_LOG_LINES}.0")
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    def _show_stats(self):
+        s, t = self.stats, self.tiles
+        elapsed = (time.perf_counter() - self.t0) if self.running else (self.last_report.elapsed_s if self.last_report else 0)
+        t["jobs"].set(s["jobs"])
+        t["complete"].set(s["complete"], "success" if s["complete"] else None)
+        t["incomplete"].set(s["incomplete"], "warning" if s["incomplete"] else None)
+        t["error"].set(s["error"], "danger" if s["error"] else None)
+        t["found"].set(s["found"])
+        t["new"].set(s["new"], "accent" if s["new"] else None)
+        t["rate"].set(f"{s['jobs'] / elapsed * 60:.1f}" if elapsed > 1 else "-")
+        t["time"].set(_duration(elapsed))
+
+    def _update_progress(self):
+        bars = (self.bar, self.app.header.bar)
+        if self.running:
+            frac = None
+            if self.run_max_jobs:
+                frac = self.stats["jobs"] / self.run_max_jobs
+            elif self.run_budget:
+                frac = (time.perf_counter() - self.t0) / self.run_budget
+            if frac is None:
+                if not self._indeterminate:
+                    for b in bars:
+                        b.configure(mode="indeterminate")
+                        b.start(15)
+                    self._indeterminate = True
+                return
+            for b in bars:
+                b.configure(mode="determinate", value=min(100.0, 100 * frac))
+        else:
+            for b in bars:
+                b.stop()
+                b.configure(mode="determinate", value=100 if self.last_report is not None else 0)
+            self._indeterminate = False
+
+    def _tick(self):
+        if not self.running:
+            return
+        self._show_stats()
+        self._update_progress()
+        self.app.header.refresh()
+        self.app.root.after(1000, self._tick)
+
+    # ---- generator access ----------------------------------------------------------------
     @staticmethod
     def _generator(cfg: GeneratorConfig):
         """Build in the calling (background) thread - SQLite connections are thread bound."""
@@ -761,7 +1120,7 @@ class GlobalTab:
 
         graph = CardGraph()
         if graph.version() == "unbuilt":
-            raise FileNotFoundError("Interaktionsgraph fehlt – zuerst `deepyugioh import-cards` ausführen")
+            raise FileNotFoundError("Interaktionsgraph fehlt, zuerst `deepyugioh import-cards` ausführen")
         return ComboGenerator(CardStore(), ComboRepository(), cfg, graph=graph, pool_factory=CardStore)
 
     def refresh_coverage(self):
@@ -779,7 +1138,9 @@ class GlobalTab:
                 tier, total if total is not None else "?", done, pct, row["complete"], row["incomplete"],
                 row["error"], row["combos_found"], row["combos_new"], TIERS.get(tier, ""),
             ))
+        restripe(self.coverage)
 
+    # ---- run control ---------------------------------------------------------------------
     def start(self):
         cfg = self.app.config_or_warn()
         if cfg is None:
@@ -787,36 +1148,41 @@ class GlobalTab:
         tiers = [t for t, v in self.tier_vars.items() if v.get()]
         try:
             if not tiers:
-                raise ValueError("Mindestens eine Stufe auswählen.")
+                raise ValueError("Mindestens eine Stufe auswählen (Seite Globaler Lauf).")
             max_jobs = _optional(self.max_jobs.get(), int, "Max. Suchen")
             budget = _optional(self.time_budget.get(), float, "Zeitbudget")
         except ValueError as e:
             messagebox.showerror("Globaler Lauf", str(e))
+            self.app.show("global")
             return
         stop = threading.Event()
-        self.stats = {"jobs": 0, "complete": 0, "incomplete": 0, "error": 0, "found": 0, "new": 0}
-        self.t0 = time.perf_counter()
         lim = cfg.limits
-        self._append(f"=== Start {time.strftime('%H:%M:%S')}: Stufen {tiers}, max. {max_jobs or 'unbegrenzt'} Suchen, "
-                     f"Budget {f'{budget:g}s' if budget else 'unbegrenzt'}, {cfg.workers} Prozess(e); "
-                     f"Karten {lim.min_cards}-{lim.max_cards}, "
-                     f"Knoten {lim.max_nodes}, Zeitlimit {lim.time_limit:g}s, Gegner {', '.join(cfg.candidates.opponent_boards)}")
 
         def work():
             gen = self._generator(cfg)
             return gen.run(tiers=tiers, max_jobs=max_jobs, time_budget=budget,
                            progress=_Listener(self.app, self._job), should_stop=stop.is_set)
 
-        self.stop_event = stop
+        # state first: task() notifies the busy listeners, which read it
+        prev = (self.stop_event, self.running, self.stats, self.last_report)
+        self.stop_event, self.running = stop, True
+        self.stats, self.last_report = self._empty_stats(), None
+        self.t0, self.run_max_jobs, self.run_budget = time.perf_counter(), max_jobs, budget
         if not self.app.task("Globaler Lauf", work, self._done):
-            self.stop_event = None
+            self.stop_event, self.running, self.stats, self.last_report = prev
             return
+        self._append(f"Start {time.strftime('%H:%M:%S')}: Stufen {tiers}, max. {max_jobs or 'unbegrenzt'} Suchen, "
+                     f"Budget {f'{budget:g}s' if budget else 'unbegrenzt'}, {cfg.workers} Prozess(e); "
+                     f"Karten {lim.min_cards}-{lim.max_cards}, Knoten {lim.max_nodes}, Zeitlimit {lim.time_limit:g}s, "
+                     f"Gegner {', '.join(cfg.candidates.opponent_boards)}", "h")
         self._busy()
+        self._tick()
 
     def stop(self):
         if self.stop_event is not None and not self.stop_event.is_set():
             self.stop_event.set()
-            self._append("… Stopp angefordert: keine neuen Suchen, laufende werden abgeschlossen und gespeichert")
+            self._append("Stopp angefordert: keine neuen Suchen, laufende werden abgeschlossen und gespeichert", "warn")
+            self._busy()
 
     def _job(self, job):
         s = self.stats
@@ -824,71 +1190,95 @@ class GlobalTab:
         s[job.status] += 1
         s["found"] += job.combos_found
         s["new"] += job.combos_new
-        elapsed = time.perf_counter() - self.t0
-        self.counters.set(
-            f"{s['jobs']} Suchen in {elapsed:.0f}s ({s['jobs'] / max(elapsed, 1e-9) * 60:.1f}/min): "
-            f"{s['complete']} vollständig, {s['incomplete']} unvollständig, {s['error']} Fehler · "
-            f"{s['found']} Combos gefunden, {s['new']} neu"
-        )
+        self._show_stats()
+        self._update_progress()
+        self.app.header.refresh()
         if job.status == "error" or job.combos_new or s["jobs"] % 25 == 0:
             extra = f"  FEHLER {job.error}" if job.error else ""
+            tag = "err" if job.status == "error" else "ok" if job.combos_new else None
             self._append(f"[Stufe {job.tier} #{job.position}] {job.status:<10} {job.elapsed_s:6.1f}s  "
-                         f"Combos {job.combos_found} (neu {job.combos_new})  Lauf #{job.run_id}{extra}")
+                         f"Combos {job.combos_found} (neu {job.combos_new})  Lauf #{job.run_id}{extra}", tag)
 
     def _done(self, report):
-        self._append(f"=== Ende: {report.jobs} Suchen in {report.elapsed_s:.0f}s - {report.complete} vollständig, "
+        self.last_report = report
+        self.running = False
+        self._append(f"Ende: {report.jobs} Suchen in {report.elapsed_s:.0f}s - {report.complete} vollständig, "
                      f"{report.incomplete} unvollständig, {report.errors} Fehler, {report.skipped} übersprungen; "
-                     f"{report.combos_found} Combos, {report.combos_new} neu in Database 1")
-        self.stop_event = None
-        self._busy()
+                     f"{report.combos_found} Combos, {report.combos_new} neu in Database 1", "h")
+        self._show_stats()
+        self._update_progress()
         self.refresh_coverage()
+        self.app.combos_tab.loaded = self.app.runs_tab.loaded = False  # reload on next visit
 
 
-# ---- tab: combos (Database 1) ---------------------------------------------------------
+# ---- page: combos (Database 1) ---------------------------------------------------------
 class CombosTab:
     def __init__(self, app: App):
         self.app = app
         self.loaded = False
-        self.frame = ttk.Frame(app.notebook, padding=8)
-        self.stats = tk.StringVar()
-        ttk.Label(self.frame, textvariable=self.stats, justify="left").pack(fill="x")
+        self.frame = _page(app)
+        overview = card(self.frame, padding=12)
+        overview.pack(fill="x")
+        tiles, self.tiles = tile_row(overview.body, [
+            ("combos", "Combos in Database 1"), ("runs", "Läufe"), ("complete", "Läufe vollständig"),
+            ("elapsed", "Dauer pro Lauf"), ("nodes", "Knoten pro Lauf"),
+        ])
+        tiles.pack(fill="x")
+        self.breakdown = ttk.Label(overview.body, text="", style="Muted.TLabel", justify="left")
+        self.breakdown.pack(fill="x", pady=(10, 0))
 
-        filt = ttk.LabelFrame(self.frame, text="Filter", padding=6)
-        filt.pack(fill="x", pady=6)
-        ttk.Label(filt, text="Karte").pack(side="left")
+        filt = card(self.frame, padding=12)
+        filt.pack(fill="x", pady=(16, 0))
+        row = filt.body
+        ttk.Label(row, text="Karte").pack(side="left")
         self.card = tk.StringVar()
-        e = ttk.Entry(filt, textvariable=self.card, width=30)
-        e.pack(side="left", padx=4)
+        e = ttk.Entry(row, textvariable=self.card, width=30)
+        e.pack(side="left", padx=8)
         e.bind("<Return>", lambda _e: self.refresh())
-        ttk.Label(filt, text="Nutzen").pack(side="left", padx=(10, 2))
+        ttk.Label(row, text="Nutzen").pack(side="left", padx=(12, 6))
         self.benefit = tk.StringVar(value="")
-        ttk.Combobox(filt, textvariable=self.benefit, values=["", *BENEFIT_CRITERIA, "wins"], state="readonly",
+        ttk.Combobox(row, textvariable=self.benefit, values=["", *BENEFIT_CRITERIA, "wins"], state="readonly",
                      width=16).pack(side="left")
-        ttk.Label(filt, text="Max. Karten").pack(side="left", padx=(10, 2))
+        ttk.Label(row, text="Max. Karten").pack(side="left", padx=(16, 6))
         self.max_cards = tk.StringVar(value="")
-        ttk.Spinbox(filt, textvariable=self.max_cards, from_=1, to=60, width=5).pack(side="left")
-        ttk.Label(filt, text="Anzahl").pack(side="left", padx=(10, 2))
+        ttk.Spinbox(row, textvariable=self.max_cards, from_=1, to=60, width=5).pack(side="left")
+        ttk.Label(row, text="Anzahl").pack(side="left", padx=(16, 6))
         self.limit = tk.StringVar(value="500")
-        ttk.Spinbox(filt, textvariable=self.limit, from_=1, to=1_000_000, increment=100, width=8).pack(side="left")
-        ttk.Button(filt, text="Anzeigen", command=self.refresh).pack(side="left", padx=10)
-        ttk.Button(filt, text="Exportieren (JSON) …", command=self.export).pack(side="right")
+        ttk.Spinbox(row, textvariable=self.limit, from_=1, to=1_000_000, increment=100, width=8).pack(side="left")
+        ttk.Button(row, text="Anzeigen", style="Accent.TButton", command=self.refresh).pack(side="left", padx=16)
+        ttk.Button(row, text="Als JSON exportieren", command=self.export).pack(side="right")
 
-        self.view = ComboView(app, self.frame, runs_for=app.repo.runs_for)
+        lst = card(self.frame, padding=12)
+        lst.pack(fill="both", expand=True, pady=(16, 0))
+        self.view = ComboView(app, lst.body, runs_for=app.repo.runs_for)
         self.view.frame.pack(fill="both", expand=True)
 
     def refresh(self):
         try:
-            card = None
+            card_ = None
             if self.card.get().strip():
-                card = self.app.store.resolve(self.card.get().strip()).code
+                card_ = self.app.store.resolve(self.card.get().strip()).code
             max_cards = _optional(self.max_cards.get(), int, "Max. Karten")
             limit = _optional(self.limit.get(), int, "Anzahl")
         except (KeyError, ValueError) as e:
             messagebox.showerror("Filter", str(e).strip("'\""))
             return
         repo = self.app.repo
-        self.stats.set(fmt.stats_text(repo.stats()))
-        combos = list(repo.iter_combos(card=card, max_cards=max_cards, positive=self.benefit.get() or None, limit=limit))
+        stats = repo.stats()
+        runs = stats["runs"]
+        t = self.tiles
+        t["combos"].set(stats["combos"], "accent" if stats["combos"] else None)
+        t["runs"].set(runs)
+        share = stats["runs_complete"] / runs if runs else None
+        t["complete"].set(f"{100 * share:.0f} %" if share is not None else "-",
+                          None if share is None else "success" if share >= 0.9 else "warning")
+        t["elapsed"].set(f"{stats['avg_elapsed_s']:.1f}s" if runs else "-")
+        t["nodes"].set(f"{stats['avg_nodes']:.0f}" if runs else "-")
+        self.breakdown.configure(text=(
+            "Nach Kartenanzahl: " + (", ".join(f"{k} Karten: {v}" for k, v in stats["by_card_count"].items()) or "-")
+            + "      Nach Nutzen: " + (", ".join(f"{k}: {v}" for k, v in stats["by_benefit"].items()) or "-")
+        ))
+        combos = list(repo.iter_combos(card=card_, max_cards=max_cards, positive=self.benefit.get() or None, limit=limit))
         self.view.set(combos)
 
     def export(self):
@@ -905,50 +1295,71 @@ class CombosTab:
         self.app.status.set(f"{len(data)} Combos exportiert nach {path}")
 
 
-# ---- tab: runs & tuning -------------------------------------------------------------
+# ---- page: runs & tuning -------------------------------------------------------------
 class RunsTab:
     def __init__(self, app: App):
         self.app = app
         self.loaded = False
-        self.frame = ttk.Frame(app.notebook, padding=8)
+        self.frame = _page(app)
         self.runs: list[dict] = []
 
-        top = ttk.Panedwindow(self.frame, orient="vertical")
-        top.pack(fill="both", expand=True)
-        tune = ttk.LabelFrame(top, text="Tuning: warum Suchen unvollständig waren (alle gespeicherten Läufe)", padding=4)
-        tune_frame, self.tuning = make_text(tune, height=10)
-        tune_frame.pack(fill="both", expand=True)
-        top.add(tune, weight=1)
+        top = ttk.Frame(self.frame, style="Page.TFrame")
+        top.pack(fill="x")
+        top.columnconfigure(0, weight=2, uniform="top")
+        top.columnconfigure(1, weight=3, uniform="top")
+        summary = card(top, "Überblick")
+        summary.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        grid = ttk.Frame(summary.body)
+        grid.pack(fill="both", expand=True)
+        self.tiles = {}
+        for n, (key, label) in enumerate([("runs", "Läufe"), ("incomplete", "unvollständig"),
+                                          ("complete", "vollständig"), ("elapsed", "Dauer pro Lauf")]):
+            self.tiles[key] = Tile(grid, label)
+            self.tiles[key].frame.grid(row=n // 2, column=n % 2, sticky="nsew", padx=(0 if n % 2 == 0 else 8, 0),
+                                       pady=(0 if n < 2 else 8, 0))
+            grid.columnconfigure(n % 2, weight=1, uniform="ov")
 
-        lower = ttk.Frame(top)
-        filt = ttk.Frame(lower)
-        filt.pack(fill="x", pady=4)
+        tune = card(top, "Tuning", "warum Suchen vorzeitig endeten, über alle gespeicherten Läufe")
+        tune.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        tree_frame, self.reasons = make_tree(tune.body, app.theme, [
+            ("kind", "Art", 95), ("reason", "Grund", 230), ("runs", "Läufe", 70), ("total", "Summe", 80),
+            ("hint", "Einstellung", 260),
+        ], height=5)
+        tree_frame.pack(fill="both", expand=True)
+
+        lst = card(self.frame, padding=12)
+        lst.pack(fill="both", expand=True, pady=(16, 0))
+        filt = ttk.Frame(lst.body)
+        filt.pack(fill="x", pady=(0, 10))
         self.incomplete_only = tk.BooleanVar(value=False)
         ttk.Checkbutton(filt, text="Nur unvollständige", variable=self.incomplete_only, command=self.refresh).pack(side="left")
-        ttk.Label(filt, text="Stufe").pack(side="left", padx=(12, 2))
+        ttk.Label(filt, text="Stufe").pack(side="left", padx=(16, 6))
         self.tier = tk.StringVar(value="alle")
         box = ttk.Combobox(filt, textvariable=self.tier, values=["alle", *TIERS], state="readonly", width=6)
         box.pack(side="left")
         box.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
-        ttk.Label(filt, text="Anzahl").pack(side="left", padx=(12, 2))
+        ttk.Label(filt, text="Anzahl").pack(side="left", padx=(16, 6))
         self.limit = tk.StringVar(value="500")
         ttk.Spinbox(filt, textvariable=self.limit, from_=1, to=1_000_000, increment=100, width=8).pack(side="left")
-        ttk.Button(filt, text="Aktualisieren", command=self.refresh).pack(side="left", padx=10)
-        self.open_btn = ttk.Button(filt, text="Startaufbau in Einzelsuche öffnen", command=self._open, state="disabled")
+        ttk.Button(filt, text="Aktualisieren", style="Accent.TButton", command=self.refresh).pack(side="left", padx=16)
+        self.open_btn = ttk.Button(filt, text="In Einzelsuche öffnen", command=self._open, state="disabled")
         self.open_btn.pack(side="right")
 
-        panes = ttk.Panedwindow(lower, orient="horizontal")
+        panes = ttk.Panedwindow(lst.body, orient="horizontal", style="Card.TPanedwindow")
         panes.pack(fill="both", expand=True)
-        tree_frame, self.tree = make_tree(panes, [
-            ("id", "Lauf", 60), ("time", "Zeit", 150), ("tier", "Stufe", 50), ("opp", "Gegner", 80),
-            ("nodes", "Knoten", 75), ("elapsed", "Dauer s", 70), ("status", "Status", 90),
-            ("reasons", "Abbruchgründe", 240), ("found", "Combos", 65), ("new", "neu", 50),
+        left = ttk.Frame(panes)
+        tree_frame, self.tree = make_tree(left, app.theme, [
+            ("id", "Lauf", 60), ("time", "Zeit", 140), ("tier", "Stufe", 55), ("opp", "Gegner", 85),
+            ("nodes", "Knoten", 80), ("elapsed", "Dauer s", 75), ("status", "Status", 100),
+            ("found", "Combos", 70), ("new", "neu", 55), ("reasons", "Abbruchgründe", 230),
         ])
+        tree_frame.pack(fill="both", expand=True, padx=(0, 8))
         self.tree.bind("<<TreeviewSelect>>", self._select)
-        panes.add(tree_frame, weight=3)
-        detail_frame, self.detail = make_text(panes, height=16, width=60)
-        panes.add(detail_frame, weight=2)
-        top.add(lower, weight=3)
+        panes.add(left, weight=3)
+        right = ttk.Frame(panes)
+        detail_frame, self.detail = make_text(right, app.theme, height=16, width=58)
+        detail_frame.pack(fill="both", expand=True, padx=(8, 0))
+        panes.add(right, weight=2)
 
     def refresh(self):
         try:
@@ -959,16 +1370,33 @@ class RunsTab:
         tier = None if self.tier.get() in ("", "alle") else int(self.tier.get())
         repo = self.app.repo
         stats = repo.stats()
-        set_text(self.tuning, fmt.stats_text(stats) + "\n\n" + fmt.tuning_text(stats))
+        runs = stats["runs"]
+        incomplete = runs - stats["runs_complete"]
+        self.tiles["runs"].set(runs)
+        self.tiles["incomplete"].set(incomplete, "warning" if incomplete else None)
+        self.tiles["complete"].set(stats["runs_complete"], "success" if stats["runs_complete"] else None)
+        self.tiles["elapsed"].set(f"{stats['avg_elapsed_s']:.1f}s" if runs else "-")
+
+        self.reasons.delete(*self.reasons.get_children())
+        for reason, (n, total) in stats["incomplete"].items():
+            self.reasons.insert("", "end", values=("Abbruch", reason, n, total, fmt.INCOMPLETE_HINTS.get(reason, "")),
+                                tags=("warn",))
+        for rule, (n, total) in stats["pruned"].items():
+            self.reasons.insert("", "end", values=("Beschnitten", rule, n, total, ""))
+        if not self.reasons.get_children():
+            self.reasons.insert("", "end", values=("", "keine Abbrüche" if runs else "noch keine Läufe", "", "", ""))
+        restripe(self.reasons)
+
         self.runs = repo.recent_runs(limit, incomplete_only=self.incomplete_only.get(), tier=tier)
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.runs):
-            self.tree.insert("", "end", iid=str(i), values=(
+            self.tree.insert("", "end", iid=str(i), tags=() if r["complete"] else ("warn",), values=(
                 r["id"], r["finished_at"].replace("T", " ").split("+")[0], r["tier"] if r["tier"] is not None else "-",
                 r["opponent_board"], r["nodes"], f"{r['elapsed_s']:.1f}",
-                "vollständig" if r["complete"] else "unvollständig", fmt.reasons(r["incomplete"]),
-                r["combos_found"], r["combos_new"],
+                "vollständig" if r["complete"] else "unvollständig", r["combos_found"], r["combos_new"],
+                fmt.reasons(r["incomplete"]),
             ))
+        restripe(self.tree)
         set_text(self.detail, "")
         self.open_btn.configure(state="disabled")
 
@@ -979,7 +1407,7 @@ class RunsTab:
     def _select(self, _event=None):
         r = self._selected()
         if r is not None:
-            set_text(self.detail, fmt.run_text(r, self.app.store.name))
+            set_text(self.detail, fmt.run_text(r, self.app.store.name), highlight=True)
             self.open_btn.configure(state="normal")
 
     def _open(self):

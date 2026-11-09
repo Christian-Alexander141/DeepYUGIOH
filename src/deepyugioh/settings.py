@@ -71,6 +71,20 @@ def set_test_mode(on: bool, path: Path | None = None) -> Path:
     return save(data, path)
 
 
+def gui_theme(path: Path | None = None) -> str:
+    """Colour scheme of the test GUI: 'dark' (default) or 'light'."""
+    theme = load(path).get("gui", {}).get("theme", "dark")
+    return theme if theme in ("dark", "light") else "dark"
+
+
+def set_gui_theme(theme: str, path: Path | None = None) -> Path:
+    if theme not in ("dark", "light"):
+        raise ValueError(f"unknown GUI theme {theme!r}")
+    data = load(path)
+    data.setdefault("gui", {})["theme"] = theme
+    return save(data, path)
+
+
 def generator_config(path: Path | None = None) -> "GeneratorConfig":
     """The persistent generator configuration (defaults for every missing key)."""
     from deepyugioh.generator.config import GeneratorConfig
