@@ -37,6 +37,10 @@ uv run deepyugioh aide plan --card "Junk Converter"        # Pläne einer Karte 
 uv run deepyugioh generate --tiers 7 --time-budget 3600    # Hybrid: Stufen 1-4 im Wechsel mit AIDE
 uv run deepyugioh benchmark --budget 300s                  # bisherige Suche vs. AIDE vs. Hybrid
 
+# Stufe 2: Combos bewerten (Database 2), inkrementell
+uv run deepyugioh analyze
+uv run deepyugioh analysis top --axis outcome --limit 10
+
 # einen einzelnen Startaufbau durchsuchen
 uv run deepyugioh search \
     --hand "Junk Synchron" "Foolish Burial" \
@@ -97,6 +101,7 @@ Bedienung, alle Seiten und das Vorgehen beim Feintuning: [Softwaredokumentation,
 | [src/deepyugioh/generator/](src/deepyugioh/generator/) | Combo Generator: Startaufbauten, Suche, Validierung, Jobs (Schritte 4–5); [aide/](src/deepyugioh/generator/aide/) plant Mehrkarten-Ketten aus Effektbeschreibungen (Stufen 5–7, optional) |
 | [src/deepyugioh/engine/](src/deepyugioh/engine/) | ctypes-Anbindung an ygopro-core |
 | [src/deepyugioh/repository/](src/deepyugioh/repository/) | Database 1 – Combo Repository (Schritt 6) |
+| [src/deepyugioh/analysis/](src/deepyugioh/analysis/) | Stufe 2: Analyzer System und Database 2 ([Konzept und Stand](docs/stufe2-konzept.md)) |
 | [src/deepyugioh/gui/](src/deepyugioh/gui/) | Test-GUI (nur im Testmodus) |
 | [src/deepyugioh/settings.py](src/deepyugioh/settings.py) | Dauerhafte lokale Einstellungen und Testmodus |
 | [third_party/](third_party/) | ygopro-core, CardScripts, BabelCDB (Submodules) |
@@ -105,7 +110,8 @@ Erzeugte Daten liegen in `data/` (nicht versioniert):
 - `cards.sqlite`: Karten und Graph,
 - `combos.sqlite`: Database 1,
 - `generator.sqlite`: Fortschritt der globalen Suche,
-- `aide.sqlite`: Kandidaten-Pool von AIDE (Pläne mit Status).
+- `aide.sqlite`: Kandidaten-Pool von AIDE (Pläne mit Status),
+- `analysis.sqlite`: Database 2, Bewertungen der Combos (Stufe 2).
 
 AIDE ist in der [Softwaredokumentation, Abschnitt 11](docs/software-dokumentation.html#aide) beschrieben, samt [Benchmark](docs/benchmarks/2026-11-09-aide.md). Bei gleicher Rechenzeit findet AIDE bisher weniger Combos als die Stufen 1–4, aber fast nur andere. Es bleibt deshalb optional, die Standardsuche ist unverändert.
 

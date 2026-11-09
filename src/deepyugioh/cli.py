@@ -7,6 +7,8 @@
     deepyugioh combos [--card NAME] [--positive opp_field_loss] [--lines]
     deepyugioh aide build|stats|explain|plan|report   AIDE: effect signatures, plans, hypothesis status
     deepyugioh benchmark [--budget 300s]    tiers 1-4 against AIDE and the hybrid tier on a card subset
+    deepyugioh analyze [--full]             Stufe 2: evaluate the combos of Database 1 into Database 2
+    deepyugioh analysis stats|show|top      read Database 2 (axes, profiles, best combos)
     deepyugioh testmode [on|off]            show or switch test mode
     deepyugioh gui                          test GUI for tuning the generator (test mode only)
 
@@ -284,6 +286,69 @@ def cmd_benchmark(args) -> int:
     return 0
 
 
+def cmd_analyze(args) -> int:
+    from deepyugioh import settings
+    from deepyugioh.analysis import AnalysisRepository, AnalyzerSystem, default_analyzers
+    from deepyugioh.analysis.system import settings_dict
+    from deepyugioh.cards.signatures import SignatureStore
+    from deepyugioh.cards.store import CardStore
+    from deepyugioh.repository.combo_db import ComboRepository
+
+    deck = settings.deck_model()
+    combos = ComboRepository()
+    analysis = AnalysisRepository()
+    system = AnalyzerSystem(combos, analysis, default_analyzers(CardStore(), SignatureStore(), deck),
+                            settings=settings_dict(deck), source=str(combos.path))
+    t0 = __import__("time").perf_counter()
+    report = system.run(full=args.full, progress=lambda i, n: print(f"  {i}/{n} combos", flush=True))
+    dt = __import__("time").perf_counter() - t0
+    print(f"{report.combos} combos in {dt:.0f}s: written {report.written}, up to date {report.skipped}")
+    for e in report.errors[:10]:
+        print(f"  error: {e}")
+    if len(report.errors) > 10:
+        print(f"  ... {len(report.errors) - 10} more errors")
+    return 0
+
+
+def _print_profile(store, combo, prof):
+    names = ", ".join(store.name(c) for c in combo.cards) if combo else "?"
+    print(f"\n{names}" + (f"  [#{combo.id}, {combo.card_count} cards]" if combo else ""))
+    for axis in ("outcome", "cost", "consistency"):
+        if axis in prof:
+            a = prof[axis]
+            score = "-" if a.score is None else f"{a.score:5.1f}"
+            print(f"   {axis:<12} {score}  {a.explanation}")
+
+
+def cmd_analysis(args) -> int:
+    from deepyugioh.analysis import AnalysisRepository
+    from deepyugioh.cards.store import CardStore
+    from deepyugioh.repository.combo_db import ComboRepository
+
+    analysis = AnalysisRepository()
+    if args.action == "stats":
+        import json
+
+        print(json.dumps(analysis.stats(), indent=2, ensure_ascii=False))
+        return 0
+    store, combos = CardStore(), ComboRepository()
+    by_sig = lambda sig: next(iter(combos.db.execute("SELECT id FROM combos WHERE signature=?", (sig,))), (None,))[0]
+    if args.action == "show":
+        if args.combo is None:
+            raise ValueError("analysis show needs --combo ID")
+        combo = combos.get(args.combo)
+        if combo is None:
+            raise KeyError(f"no combo #{args.combo} in Database 1")
+        _print_profile(store, combo, analysis.profile(combo.signature))
+        return 0
+    if args.action == "top":
+        for sig, _ in analysis.top(args.axis, limit=args.limit):
+            cid = by_sig(sig)
+            _print_profile(store, combos.get(cid) if cid else None, analysis.profile(sig))
+        return 0
+    raise ValueError(f"unknown analysis action {args.action}")
+
+
 def cmd_testmode(args) -> int:
     from deepyugioh import settings
 
@@ -383,6 +448,17 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--variants", nargs="+", default=["baseline", "hybrid", "aide"], choices=["baseline", "hybrid", "aide"])
     b.add_argument("--out", help="output directory (default data/benchmark/<time>)")
     b.set_defaults(fn=cmd_benchmark)
+
+    an = sub.add_parser("analyze", help="Stufe 2: evaluate the combos of Database 1 (incremental) into Database 2")
+    an.add_argument("--full", action="store_true", help="recompute every axis for every combo")
+    an.set_defaults(fn=cmd_analyze)
+
+    ar = sub.add_parser("analysis", help="read Database 2: stats, the profile of one combo, best combos of an axis")
+    ar.add_argument("action", choices=["stats", "show", "top"])
+    ar.add_argument("--combo", type=int, help="show: combo id in Database 1")
+    ar.add_argument("--axis", default="outcome", choices=["outcome", "cost", "consistency"])
+    ar.add_argument("--limit", type=int, default=10)
+    ar.set_defaults(fn=cmd_analysis)
 
     t = sub.add_parser("testmode", help="show or switch test mode (enables the test GUI)")
     t.add_argument("state", nargs="?", choices=["on", "off"])

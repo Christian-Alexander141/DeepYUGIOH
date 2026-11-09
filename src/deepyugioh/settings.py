@@ -119,6 +119,24 @@ def set_run_options(options: dict, path: Path | None = None) -> Path:
     return save(data, path)
 
 
+def deck_model(path: Path | None = None):
+    """Deck model of the Analyzer System ([analysis.deck]); defaults for missing keys."""
+    from dataclasses import fields
+
+    from deepyugioh.analysis.axes import DeckModel
+
+    stored = load(path).get("analysis", {}).get("deck", {})
+    known = {f.name for f in fields(DeckModel)}
+    unknown = set(stored) - known
+    if unknown:
+        raise ValueError(f"unknown [analysis.deck] options: {sorted(unknown)}")
+    model = DeckModel(**stored)
+    if not (1 <= model.hand_first <= model.deck_size and 1 <= model.hand_second <= model.deck_size
+            and 1 <= model.copies <= 3 and model.family_max_cards >= 1):
+        raise ValueError("[analysis.deck]: invalid deck model")
+    return model
+
+
 def generator_config(path: Path | None = None) -> "GeneratorConfig":
     """The persistent generator configuration (defaults for every missing key)."""
     from deepyugioh.generator.config import GeneratorConfig

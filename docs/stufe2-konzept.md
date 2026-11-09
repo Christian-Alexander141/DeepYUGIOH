@@ -1,6 +1,6 @@
 # Stufe 2: Analyzer System, Database 2 und Qualitätsfilter
 
-Stand: 9. November 2026 · Status: Konzept, abgestimmt mit den Entscheidungen vom 9. November 2026
+Stand: 9. November 2026 · Status: Schritte 2.1 und 2.2 umgesetzt (siehe Abschnitt 13), der Rest ist Konzept
 
 Stufe 2 bewertet die Combos, die Phase 1 in Database 1 gefunden hat: wie stark sie sind, in welcher Situation, und wie gut sie zu anderen Combos und Decks passen. Sie macht das für den Deckbauer sichtbar und filterbar. Grundsatz aus dem [Gesamtkonzept](konzept.md):
 
@@ -130,8 +130,8 @@ Combos werden über ihre `signature` angesprochen, nicht über die interne ID vo
 
 | Schritt | Inhalt |
 |---|---|
-| 2.1 | Grundgerüst: Database 2, Analyzer-Vertrag, inkrementeller und versionierter Lauf über Database 1, CLI `deepyugioh analyze` |
-| 2.2 | Rechnerische Achsen: Ergebnis (Endfeld mit Störungen aus den Effect Signatures), Einsatz, Konsistenz mit Familien |
+| 2.1 ✓ | Grundgerüst: Database 2, Analyzer-Vertrag, inkrementeller und versionierter Lauf über Database 1, CLI `deepyugioh analyze` |
+| 2.2 ✓ | Rechnerische Achsen: Ergebnis (Endfeld mit Störungen aus den Effect Signatures), Einsatz, Konsistenz mit Familien |
 | 2.3 | Deckspezifität: Sperren in den Effect Signatures, Anforderungsprofil, Generizität pro Karte und Combo, Passung zu Deckprofilen |
 | 2.4 | Normierung, allgemeine Spielstärke und Situationswerte mit Standardgewichten (`[analysis.weights]`) |
 | 2.5 | Kompatibilitätskanten zwischen Combos |
@@ -147,3 +147,46 @@ Jeder Schritt bekommt Tests und Dokumentation. Database 1 und das Verhalten von 
 - **Kalibrierung**: Die Standardgewichte sind begründete Startwerte, kein Beweis für Spielstärke. Belastbar werden sie erst durch Simulationen ganzer Spiele (Phase 4). Bis dahin zeigt jede Bewertung ihre Rohwerte und Begründung, damit sie nachvollziehbar bleibt.
 - **Handtrap-Katalog und Verbreitung**: Der Startkatalog ist generisch. Archetypspezifische Unterbrechungen und eine an Daten gemessene Verbreitung folgen später.
 - **Gegnerfelder für „Durchbrechen“**: Die heutigen Gegnerfelder handeln nie. Für echtes Durchbrechen braucht es Gegnerfelder mit Störungen. Das hängt mit der adversarialen Suche aus Schritt 2.8 zusammen.
+
+## 13. Umsetzungsstand (Schritte 2.1 und 2.2)
+
+### Benutzung
+
+```bash
+uv run deepyugioh analyze                    # bewertet neue oder veraltete Combos, normiert alle Achsen
+uv run deepyugioh analyze --full             # alles neu berechnen
+uv run deepyugioh analysis stats             # Achsen, Familien, letzter Lauf
+uv run deepyugioh analysis show --combo 19542
+uv run deepyugioh analysis top --axis outcome --limit 10
+```
+
+Der erste Lauf über die 41.518 Combos von Database 1 dauert etwa 26 Sekunden. Danach werden nur neue Combos und Achsen mit geänderter Analyzer-Version neu berechnet. Die Konsistenz wird immer vollständig neu berechnet, weil sie von den anderen Combos ihrer Familie abhängt (etwa 19 Sekunden).
+
+### Code
+
+| Datei | Inhalt |
+|---|---|
+| [contracts/analysis.py](../src/deepyugioh/contracts/analysis.py) | Vertrag: `Analyzer` (`name`, `version`, `global_`, `prepare`, `analyze`), `AxisResult`, `AxisScore`, `AnalysisReader` |
+| [analysis/axes.py](../src/deepyugioh/analysis/axes.py) | Achsen Ergebnis, Einsatz, Konsistenz, Combo-Familien, Deckmodell |
+| [analysis/probability.py](../src/deepyugioh/analysis/probability.py) | exakte Starthand-Wahrscheinlichkeiten (multivariat hypergeometrisch, ohne Stichproben) |
+| [analysis/store.py](../src/deepyugioh/analysis/store.py) | Database 2 (`data/analysis.sqlite`): `analyses`, `combo_axes`, `combo_profiles`, `meta` |
+| [analysis/system.py](../src/deepyugioh/analysis/system.py) | Analyzer System: inkrementell, versioniert, Database 1 wird gestreamt, Normierung auf Perzentile |
+| [tests/test_analysis.py](../tests/test_analysis.py) | Wahrscheinlichkeiten, Achsen an echten Karten, inkrementelle und versionierte Läufe, Deckmodell |
+
+### Achsen
+
+| Achse | Rohwerte | Wert (höher = besser) |
+|---|---|---|
+| **Ergebnis** (`outcome`, Version 1) | Monster, Feldkarten, ATK gesamt/max., Störungen für den gegnerischen Zug (davon Negates) mit Karte und Zone, unklare Störungen, Kartenvorteil, Hand danach, Verluste des Gegners, Schaden, Sieg | 100·Sieg + 4·Negates + 3·übrige Störungen + 1·unklare + 2·gegnerische Feldverluste + 2·gegnerische Handverluste + Schaden/1000 + Kartenvorteil + 0,5·Monster + 0,3·ATK/1000 |
+| **Einsatz** (`cost`, Version 1) | Karten (Hand, Deck, Extra Deck), Aktionen, gezahlte LP, Normalbeschwörung verbraucht | −(2·Hand + 1·Deck + 0,5·Extra + 0,05·Aktionen + LP/1000 + 0,5·Normalbeschwörung) |
+| **Konsistenz** (`consistency`, Version 3) | Wahrscheinlichkeit der eigenen Starthand und der Familie, als Erster (5 Karten) und als Zweiter (6 Karten), Größe der Familie | Familie als Erster |
+
+**Störungen** sind Effekte, die im Zug des Gegners nutzbar sind und den Gegner treffen. Dazu zählen Quick-Effekte in der passenden Zone, gesetzte Fallen und Schnellzauber sowie Auslöser auf Aktionen des Gegners. Ein Effekt mit „hart einmal pro Zug“ zählt pro Karte einmal. Negates erkennt die Analyse an den Kategorien NEGATE, DISABLE und DISABLE_SUMMON, Entfernung an Bewegungen von Gegnerkarten. Ob die Bedingungen eines Effekts im Spiel tatsächlich erfüllt sind, prüft erst die Robustheit per Engine (Schritt 2.8). Bis dahin ist die Störungszahl eine Ableitung aus den Effect Signatures. In Database 1 haben 15 % der Combos mindestens eine erkannte Störung.
+
+**Combo-Familie**: Combos mit demselben Ergebnis (eigenes Feld, gewonnene Handkarten, Verluste des Gegners) und unterschiedlichen Startkarten. Ihre Konsistenz ist die Wahrscheinlichkeit, *irgendeine* ihrer Starthände zu ziehen. Database 1 hat 16.684 Familien, die größte erreicht dasselbe Ergebnis über 20 verschiedene Starthände. Bei mehr als 14 relevanten Handkarten wird die Familie gekürzt, der Wert ist dann eine untere Grenze und als solche markiert.
+
+**Deckmodell** (`[analysis.deck]` in `deepyugioh.toml`): `deck_size` 40, `copies` 3, `hand_first` 5, `hand_second` 6, `family_max_cards` 14.
+
+### Befund aus Phase 1
+
+30 Combos haben keine Handkarte als Voraussetzung, obwohl ihr Startaufbau eine hat. Die Karte wird benutzt, verlässt die Hand aber nicht (z. B. vorgezeigt). Die Konsistenz nimmt dann vorsichtig die Starthand des Aufbaus und markiert das (`hand_from_setup`). Korrigieren lässt sich das in der Bedarfsermittlung von Phase 1 (`requirements` in `generator/search/combo.py`). Das ändert Combo-Signaturen und gehört deshalb zur Phase-1-Erweiterung (Schritt 2.9).

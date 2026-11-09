@@ -530,6 +530,7 @@ uv run deepyugioh testmode off     # wieder ausschalten</code></pre>
   <tr><td><code>combos.sqlite</code></td><td>Database 1: Combos und Läufe</td><td>Generator über <code>ComboSink</code></td></tr>
   <tr><td><code>generator.sqlite</code></td><td>Fortschritt der globalen Suche: erledigte Kandidaten und Cursor pro Stufe</td><td>Generator (<code>JobStore</code>)</td></tr>
   <tr><td><code>aide.sqlite</code></td><td>Kandidaten-Pool von AIDE: Pläne (Hypothesen) mit Status, Herkunft und Startaufbauten, abgelehnte Rückwärts-Ansätze, Plan-Cache pro Wurzelkarte</td><td>AIDE (<code>HypothesisStore</code>)</td></tr>
+  <tr><td><code>analysis.sqlite</code></td><td>Database 2 (Stufe 2): Bewertungen der Combos pro Achse, Combo-Familien; siehe <a href="stufe2-konzept.md">stufe2-konzept.md</a></td><td><code>analyze</code></td></tr>
   <tr><td><code>benchmark/&lt;Zeit&gt;/</code></td><td>Benchmark-Bericht (<code>benchmark.md</code>, <code>benchmark.json</code>) und je Variante eigene Datenbanken</td><td><code>benchmark</code></td></tr>
 </table></div>
 <h3>Database 1 (<code>combos.sqlite</code>)</h3>

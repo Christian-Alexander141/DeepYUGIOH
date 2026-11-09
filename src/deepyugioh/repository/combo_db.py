@@ -102,6 +102,7 @@ class ComboRepository:
     def __init__(self, path: Path | None = None):
         path = path or paths.combo_db()
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
