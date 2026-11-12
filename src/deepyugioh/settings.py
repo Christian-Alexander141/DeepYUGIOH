@@ -163,6 +163,58 @@ def reset_analysis_weights(name: str | None = None, path: Path | None = None) ->
     return save(data, path)
 
 
+def analysis_workers(path: Path | None = None) -> int:
+    """Worker processes for the engine work of Stufe 2 ([analysis] workers; default: the generator's)."""
+    data = load(path)
+    workers = data.get("analysis", {}).get("workers", data.get("workers", 1))
+    if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
+        raise ValueError("[analysis] workers must be a whole number >= 1")
+    return workers
+
+
+def compatibility_settings(path: Path | None = None):
+    """[analysis.compatibility]: how many partner edges are stored per combo and from which strength on."""
+    from dataclasses import fields
+
+    from deepyugioh.analysis.compatibility import CompatibilitySettings
+
+    stored = load(path).get("analysis", {}).get("compatibility", {})
+    unknown = set(stored) - {f.name for f in fields(CompatibilitySettings)}
+    if unknown:
+        raise ValueError(f"unknown [analysis.compatibility] options: {sorted(unknown)}")
+    out = CompatibilitySettings(**stored)
+    if out.max_shared < 0 or out.max_archetype < 0 or not 0 <= out.min_shared <= 1 or not 0 < out.min_archetype <= 1 \
+            or not 0 <= out.order_factor <= 1 or not 0 < out.ubiquitous_share <= 1:
+        raise ValueError("[analysis.compatibility]: invalid values")
+    return out
+
+
+def robustness_settings(path: Path | None = None):
+    """[analysis.robustness]: limits per search and the handtrap catalog ([analysis.robustness.handtraps.KEY]
+    with card, weight, deck, enabled). Setting cards is searched exactly as the generator does ([limits])."""
+    from deepyugioh.analysis.robustness import RobustnessSettings
+
+    data = load(path)
+    stored = dict(data.get("analysis", {}).get("robustness", {}))
+    limits = data.get("limits", {})
+    for key in ("allow_mset", "allow_sset", "max_choices"):
+        if key in limits:
+            stored.setdefault(key, limits[key])
+    return RobustnessSettings.from_dict(stored)
+
+
+def set_handtrap_weights(weights: dict[str, float], path: Path | None = None) -> Path:
+    """Store how common each handtrap is (0-1); validated first, other settings are kept."""
+    from deepyugioh.analysis.robustness import RobustnessSettings
+
+    data = load(path)
+    traps = data.setdefault("analysis", {}).setdefault("robustness", {}).setdefault("handtraps", {})
+    for key, w in weights.items():
+        traps.setdefault(key, {})["weight"] = float(w)
+    RobustnessSettings.from_dict(data["analysis"]["robustness"])
+    return save(data, path)
+
+
 def generator_config(path: Path | None = None) -> "GeneratorConfig":
     """The persistent generator configuration (defaults for every missing key)."""
     from deepyugioh.generator.config import GeneratorConfig

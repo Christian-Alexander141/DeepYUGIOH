@@ -101,7 +101,10 @@ def setup_text(setup: StartSetup, name: Namer) -> str:
         f"  Hand:   {names(setup.hand, name)}\n"
         f"  Deck:   {names(setup.deck, name)}\n"
         f"  Extra:  {names(setup.extra, name)}\n"
-        f"  Gegner: {setup.opponent.name} - {opp}\n"
+        + (f"  Friedhof: {names(setup.grave, name)}\n" if setup.grave else "")
+        + (f"  Verbannt: {names(setup.banished, name)}\n" if setup.banished else "")
+        + (f"  Feld:   {', '.join(f'{name(c.code)} [{c.zone}]' for c in setup.field)}\n" if setup.field else "")
+        + f"  Gegner: {setup.opponent.name} - {opp}\n"
         f"  Zonen verzweigen: {'ja' if setup.branch_zones else 'nein'}"
     )
 
@@ -141,6 +144,9 @@ def combo_text(combo: ComboRecord, name: Namer, *, all_steps: bool = False, runs
         f"  Hand:   {names(combo.hand, name)}",
         f"  Deck:   {names(combo.deck, name)}",
         f"  Extra:  {names(combo.extra, name)}",
+        *([f"  Schon im Friedhof: {names(combo.grave, name)}"] if combo.grave else []),
+        *([f"  Schon verbannt:    {names(combo.banished, name)}"] if combo.banished else []),
+        *([f"  Schon auf dem Feld: {names(combo.field, name)}"] if combo.field else []),
         "",
         f"Nutzen:  {', '.join(combo.positive) or '-'}",
         f"  Werte: {raw or '-'}",
@@ -238,3 +244,92 @@ def combo_export(combo: ComboRecord, name: Namer) -> dict:
         "end_board": combo.end_board,
         "setup": combo.setup.to_dict(),
     }
+
+
+# ---- Stufe 2: evaluation profiles -------------------------------------------------------------
+AXIS_ORDER = ("strength", "opening", "breaking", "late", "outcome", "cost", "consistency", "robustness", "genericness",
+              "compatibility", "line")
+AXIS_LABELS = {
+    "strength": "Spielstärke", "opening": "Spielbeginn", "breaking": "Durchbrechen", "late": "Späteres Spiel",
+    "outcome": "Ergebnis", "cost": "Einsatz", "consistency": "Konsistenz", "robustness": "Robustheit",
+    "genericness": "Generizität", "compatibility": "Kompatibilität", "line": "Linienfakten",
+}
+EDGE_LABELS = {"shared_cards": "gemeinsame Karten", "archetype": "gemeinsamer Archetyp", "lock_conflict": "Sperrkonflikt"}
+
+
+def axis_label(axis: str) -> str:
+    return AXIS_LABELS.get(axis, axis)
+
+
+def score(value) -> str:
+    return "-" if value is None else f"{value:.0f}"
+
+
+def profile_text(combo: ComboRecord | None, profile: dict, name: Namer, *, edges: list[dict] | None = None,
+                 robustness: list[tuple] | None = None, short: Callable[[str], str] | None = None,
+                 fit: float | None = None, deck: str = "") -> str:
+    """Evaluation profile of one combo: every axis with score and reason, handtraps, partners, the line."""
+    title = "Combo" if combo is None else (f"Combo #{combo.id}" if combo.id is not None else "Combo")
+    parts = [f"{title}: {names(combo.cards, name) if combo else '?'}", ""]
+    if fit is not None:
+        parts += [f"Passung zum Deckprofil {deck}: {fit:.0f}", ""]
+    parts.append("Bewertungsprofil (Wert 0-100 = besser als so viele Prozent der Combos):")
+    for axis in (*AXIS_ORDER, *sorted(set(profile) - set(AXIS_ORDER))):
+        if axis in profile:
+            a = profile[axis]
+            parts.append(f"  {axis_label(axis):<16}{score(a.score):>4}   {a.explanation}")
+    if robustness:
+        parts += ["", "Handtraps (garantiertes Ergebnis nach der besten Antwort):"]
+        for handtrap, status, value, data in robustness:
+            crit = data.get("critical")
+            where = f"   kritisch nach: {crit['after']}" if crit else ""
+            state = "" if status == "complete" else f"   UNVOLLSTÄNDIG {reasons(data.get('incomplete', {}))}"
+            val = "-" if value is None else f"{value:.2f}"
+            parts.append(f"  {handtrap:<32}{val:>8}{where}{state}")
+    if edges:
+        parts += ["", "Partner und Konflikte (gespeicherte Kanten, stärkste zuerst):"]
+        for e in edges:
+            d = e["data"]
+            if e["kind"] == "shared_cards":
+                detail = names(d["cards"], name)
+            elif e["kind"] == "archetype":
+                detail = d["archetype"]
+            else:
+                who = "sperrt" if e["direction"] == "out" else "wird gesperrt von"
+                detail = f"{who}: " + "; ".join(names(f["cards"], name) for f in d["conflicts"])
+            other = short(e["other"]) if short else e["other"][:12]
+            parts.append(f"  {EDGE_LABELS.get(e['kind'], e['kind']):<22}{e['strength']:.2f}  {other}")
+            parts.append(f"      {detail}")
+    if combo is not None:
+        me = combo.end_board["players"][0]
+        parts += ["", "Benötigte Karten:", f"  Hand:   {names(combo.hand, name)}", f"  Deck:   {names(combo.deck, name)}",
+                  f"  Extra:  {names(combo.extra, name)}",
+                  *([f"  Schon im Friedhof / verbannt / auf dem Feld: {names(combo.resources, name)}"] if combo.resources else []),
+                  "", "Endfeld:", _player(me, name), "", "Linie:", line_text(combo)]
+    return "\n".join(parts)
+
+
+def parse_pairs(text: str, what: str) -> dict[str, float]:
+    """'strength=70, outcome.disruptions=1' -> {...}; raises ValueError with a readable message."""
+    out = {}
+    for item in text.replace(";", ",").replace("\n", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        key, sep, value = item.partition("=")
+        try:
+            if not sep:
+                raise ValueError
+            out[key.strip()] = float(value.strip().replace(",", "."))
+        except ValueError:
+            raise ValueError(f"{what}: '{item}' ist nicht in der Form Name=Zahl") from None
+    return out
+
+
+def pairs_text(d: dict[str, float]) -> str:
+    return ", ".join(f"{k}={v:g}" for k, v in d.items())
+
+
+def words(text: str) -> tuple[str, ...]:
+    """Comma separated names -> tuple (archetypes, types, attributes of a deck profile)."""
+    return tuple(w.strip() for w in text.split(",") if w.strip())

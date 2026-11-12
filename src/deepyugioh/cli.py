@@ -8,9 +8,12 @@
     deepyugioh aide build|stats|explain|plan|report   AIDE: effect signatures, plans, hypothesis status
     deepyugioh benchmark [--budget 300s]    tiers 1-4 against AIDE and the hybrid tier on a card subset
     deepyugioh analyze [--full]             Stufe 2: evaluate the combos of Database 1 into Database 2
-    deepyugioh analysis stats|show|top|card|fit   read Database 2 (axes, combos, card profiles, deck fit)
+    deepyugioh analysis stats|show|top|card|fit|compat|robust   read Database 2
+    deepyugioh robustness run|stats         Stufe 2: handtrap search per engine (resumable, parallel)
+    deepyugioh filter list|save|run|show|export|delete   quality filter: stored profiles and their combos
+    deepyugioh recheck [--apply]            replay Database 1 and correct the required cards (after a rule fix)
     deepyugioh testmode [on|off]            show or switch test mode
-    deepyugioh gui                          test GUI for tuning the generator (test mode only)
+    deepyugioh gui [--stage 2]              test GUI: Combo Generator (stage 1) or Analyzer System (stage 2), test mode only
 
 Without --config the generator settings come from the local settings file
 (deepyugioh.toml, written by the test GUI); missing keys use the defaults.
@@ -287,44 +290,31 @@ def cmd_benchmark(args) -> int:
 
 
 def cmd_analyze(args) -> int:
-    from deepyugioh import settings
-    from deepyugioh.analysis import AnalysisRepository, AnalyzerSystem, default_analyzers
-    from deepyugioh.analysis.system import settings_dict
-    from deepyugioh.cards.signatures import SignatureStore
-    from deepyugioh.cards.store import CardStore
-    from deepyugioh.repository.combo_db import ComboRepository
+    from deepyugioh.analysis.pipeline import run_analysis
 
-    deck = settings.deck_model()
-    combos = ComboRepository()
-    analysis = AnalysisRepository()
-    system = AnalyzerSystem(combos, analysis, default_analyzers(CardStore(), SignatureStore(), deck),
-                            settings=settings_dict(deck), source=str(combos.path))
-    t0 = __import__("time").perf_counter()
-    report = system.run(full=args.full, progress=lambda i, n: print(f"  {i}/{n} combos", flush=True))
-    dt = __import__("time").perf_counter() - t0
-    print(f"{report.combos} combos in {dt:.0f}s: written {report.written}, up to date {report.skipped}")
-    _rescore(analysis)
-    for e in report.errors[:10]:
-        print(f"  error: {e}")
-    if len(report.errors) > 10:
-        print(f"  ... {len(report.errors) - 10} more errors")
+    run_analysis(full=args.full, engine=not args.no_engine, workers=args.workers,
+                 progress=lambda what, i, n: print(f"  {what} {i}/{n}", flush=True))
     return 0
 
 
-def _rescore(analysis):
-    from deepyugioh import settings
-    from deepyugioh.analysis import Rescorer
+def _rescore(analysis=None):
+    from deepyugioh.analysis.pipeline import rescore
 
-    for name, info in Rescorer(analysis, settings.analysis_scorings()).run().items():
-        missing = f" (without {', '.join(info['missing'])} - not analysed yet)" if info["missing"] else ""
-        print(f"scoring {name} {info['version']}: {info['combos']} combos{missing}")
+    rescore()
+
+
+def _run_filters(qf, name: str | None = None):
+    from deepyugioh.analysis.pipeline import run_filters
+
+    run_filters(qf, name)
 
 
 def _print_profile(store, combo, prof):
     names = ", ".join(store.name(c) for c in combo.cards) if combo else "?"
     print(f"\n{names}" + (f"  [#{combo.id}, {combo.card_count} cards]" if combo else ""))
-    for axis in ("strength", "opening", "breaking", "outcome", "cost", "consistency", "genericness",
-                 *sorted(set(prof) - {"strength", "opening", "breaking", "outcome", "cost", "consistency", "genericness"})):
+    order = ("strength", "opening", "breaking", "late", "outcome", "cost", "consistency", "robustness", "genericness",
+             "compatibility", "line")
+    for axis in (*order, *sorted(set(prof) - set(order))):
         if axis in prof:
             a = prof[axis]
             score = "-" if a.score is None else f"{a.score:5.1f}"
@@ -344,12 +334,71 @@ def cmd_analysis(args) -> int:
         return 0
     store, combos = CardStore(), ComboRepository()
     by_sig = lambda sig: next(iter(combos.db.execute("SELECT id FROM combos WHERE signature=?", (sig,))), (None,))[0]
-    if args.action == "show":
+
+    def need_combo():
         if args.combo is None:
-            raise ValueError("analysis show needs --combo ID")
+            raise ValueError(f"analysis {args.action} needs --combo ID")
         combo = combos.get(args.combo)
         if combo is None:
             raise KeyError(f"no combo #{args.combo} in Database 1")
+        return combo
+
+    def short(sig):
+        c = combos.by_signature(sig)
+        return f"#{c.id} {', '.join(store.name(x) for x in c.cards)}" if c else sig[:12]
+
+    if args.action == "compat":
+        from deepyugioh.analysis.compatibility import KINDS, conflict_text, load_index
+
+        combo = need_combo()
+        if args.other is not None:
+            other = combos.get(args.other)
+            if other is None:
+                raise KeyError(f"no combo #{args.other} in Database 1")
+            from deepyugioh.cards.signatures import SignatureStore
+
+            rel = load_index(analysis, SignatureStore().card).relation(combo.signature, other.signature)
+            print(f"{short(combo.signature)}\n{short(other.signature)}")
+            print(f"  gemeinsame Karten ({rel['shared_strength']:.2f}): "
+                  f"{', '.join(store.name(c) for c in rel['shared_cards']) or '-'}")
+            print(f"  gemeinsamer Archetyp ({rel['archetype_strength']:.2f}): {', '.join(rel['archetypes']) or '-'}")
+            for label, found in (("erste sperrt zweite", rel["a_forbids_b"]), ("zweite sperrt erste", rel["b_forbids_a"])):
+                for f in found:
+                    print(f"  Sperrkonflikt ({label}, {f['strength']:.2f}): {conflict_text(f, store.name)}")
+                if not found:
+                    print(f"  kein Sperrkonflikt ({label})")
+            return 0
+        _print_profile(store, combo, {k: v for k, v in analysis.profile(combo.signature).items() if k == "compatibility"})
+        for e in analysis.edges(combo.signature, kind=args.kind, limit=args.limit):
+            d = e["data"]
+            if e["kind"] == "shared_cards":
+                detail = ", ".join(store.name(c) for c in d["cards"])
+            elif e["kind"] == "archetype":
+                detail = d["archetype"]
+            else:
+                detail = ("sperrt: " if e["direction"] == "out" else "wird gesperrt: ") + "; ".join(
+                    ", ".join(store.name(c) for c in f["cards"]) for f in d["conflicts"])
+            print(f"   {KINDS[e['kind']]:<22} {e['strength']:.2f}  {short(e['other'])}  [{detail}]")
+        return 0
+    if args.action == "robust":
+        from deepyugioh import settings
+
+        combo = need_combo()
+        rs = settings.robustness_settings()
+        rows = list(analysis.robustness_rows(combo.signature, rs.search_version()))
+        _print_profile(store, combo, {k: v for k, v in analysis.profile(combo.signature).items() if k == "robustness"})
+        if not rows:
+            print(f"   noch nicht gesucht - `deepyugioh robustness run --combo {combo.id}`")
+        for _, h, status, value, data in rows:
+            label = "ungestört" if h == "-" else rs.catalog.get(h, {}).get("card", h)
+            crit = data.get("critical")
+            where = f"  nach „{crit['after']}“" if crit else ("" if h == "-" else "  nicht eingesetzt")
+            val = "-" if value is None else f"{value:.2f}"
+            reasons = f"  {data['incomplete']}" if data.get("incomplete") else ""
+            print(f"   {label:<32} {status:<10} garantiert {val:>7}  {data['nodes']} Knoten{where}{reasons}")
+        return 0
+    if args.action == "show":
+        combo = need_combo()
         _print_profile(store, combo, analysis.profile(combo.signature))
         return 0
     if args.action == "top":
@@ -406,28 +455,139 @@ def cmd_analysis(args) -> int:
 
 
 def _deck_profile(args):
-    from deepyugioh.analysis import DeckProfile
-    from deepyugioh.cards.references import constants
+    from deepyugioh.analysis import deck_profile_from_names
 
-    consts = constants()
-
-    def const(prefix, name):
-        key = prefix + name.upper().replace("-", "_").replace(" ", "_").replace('"', "")
-        if key not in consts:
-            close = [k[len(prefix):] for k in consts if k.startswith(prefix) and name.upper().replace(" ", "_") in k][:5]
-            raise KeyError(f"unknown {prefix[:-1].lower()} {name!r}" + (f" (meant: {', '.join(close)}?)" if close else ""))
-        return consts[key]
-
-    arche = frozenset(const("SET_", a) for a in args.archetype or ())
-    races = attrs = 0
-    for r in args.race or ():
-        races |= const("RACE_", r)
-    for a in args.attribute or ():
-        attrs |= const("ATTRIBUTE_", a)
-    if not (arche or races or attrs):
+    if not (args.archetype or args.race or args.attribute):
         raise ValueError("a deck profile needs --archetype, --race or --attribute")
-    name = ", ".join([*(args.archetype or ()), *(args.race or ()), *(args.attribute or ())])
-    return DeckProfile(arche, races, attrs, name)
+    return deck_profile_from_names(args.archetype, args.race, args.attribute)
+
+
+def cmd_robustness(args) -> int:
+    from deepyugioh import settings
+    from deepyugioh.analysis import AnalysisRepository
+    from deepyugioh.analysis.pipeline import run_robustness_search
+
+    if args.action == "stats":
+        analysis = AnalysisRepository()
+        rs = settings.robustness_settings()
+        stats = analysis.robustness_stats()
+        print(f"search rules {rs.search_version()}, {len(rs.catalog)} handtraps: "
+              + ", ".join(f"{v['card']} ({v.get('weight', 1.0):g})" for v in rs.catalog.values()))
+        for status, row in stats.items():
+            print(f"  {status:<11} {row['jobs']} searches over {row['combos']} combos, {row['seconds']:.0f}s engine time")
+        if not stats:
+            print("  nothing searched yet - `deepyugioh robustness run`")
+        print(f"  axis robustness: {len(analysis.scores('robustness'))} combos")
+        return 0
+
+    def progress(s):
+        if s["combos"] % args.report_every == 0:
+            print(f"  {s['combos']}/{s['pending']} combos ({s['complete']} complete, {s['incomplete']} incomplete, "
+                  f"{len(s['errors'])} errors), {s['searches']} searches, {s['elapsed']:.0f}s", flush=True)
+
+    run_robustness_search(workers=args.workers, max_combos=args.max_combos, time_budget=args.time_budget,
+                          retry_incomplete=args.retry_incomplete, combo_ids=args.combo, progress=progress)
+    return 0
+
+
+def _pairs(items, what) -> dict[str, float]:
+    out = {}
+    for item in items or ():
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise ValueError(f"{what}: expected NAME=NUMBER, got {item!r}")
+        out[key] = float(value)
+    return out
+
+
+def cmd_filter(args) -> int:
+    from deepyugioh.analysis import AnalysisRepository, FilterProfile, QualityFilter
+    from deepyugioh.cards.store import CardStore
+    from deepyugioh.repository.combo_db import ComboRepository
+
+    analysis = AnalysisRepository()
+    qf = QualityFilter(analysis)
+    qf.ensure_defaults()
+    need_name = lambda: args.name or (_ for _ in ()).throw(ValueError(f"filter {args.action} needs a profile NAME"))
+    if args.action == "list":
+        for name, info in analysis.filters().items():
+            spec = info["spec"]
+            state = "not applied yet" if info["applied_at"] is None else (
+                f"{info['members']} of {info['considered']} combos" + (" - STALE, run `filter run`" if info["stale"] else ""))
+            print(f"{name:<16} {spec.get('label', ''):<44} {state}")
+        return 0
+    if args.action == "save":
+        late = True if args.late else False if args.no_late else None
+        profile = FilterProfile(
+            need_name(), args.label or "", _pairs(args.min, "--min"), args.rank_by, _pairs(args.weight, "--weight"),
+            tuple(args.archetype or ()), tuple(args.race or ()), tuple(args.attribute or ()), args.min_fit, args.locks,
+            args.min_cards, args.max_cards, late, not args.keep_dominated, args.limit)
+        if profile.has_deck:
+            _deck_profile(args)   # unknown archetype / type / attribute names fail here, not at the first run
+        qf.save(profile)
+        _run_filters(qf, profile.name)
+        return 0
+    if args.action == "run":
+        _run_filters(qf, args.name)
+        return 0
+    if args.action == "delete":
+        analysis.delete_filter(need_name())
+        print(f"filter {args.name} deleted")
+        return 0
+    store, combos = CardStore(), ComboRepository()
+    if args.action == "show":
+        info = analysis.filters().get(need_name())
+        if info is None:
+            raise KeyError(f"no filter profile {args.name!r}")
+        print(f"{args.name}: {info['spec']}")
+        print(f"{info['members']} of {info['considered']} combos, removed: {info['dropped'] or 'nothing'}"
+              + ("  - STALE: Database 2 changed since, run `deepyugioh filter run`" if info["stale"] else ""))
+        for sig, rank, value, fit in analysis.filter_results(args.name, args.limit):
+            combo = combos.by_signature(sig)
+            print(f"\n  Rang {rank}: {value:.1f}" + (f", Passung {fit:.0f}" if fit is not None else ""))
+            _print_profile(store, combo, analysis.profile(sig))
+        return 0
+    if args.action == "export":
+        from deepyugioh import paths
+
+        out = Path(args.out) if args.out else paths.DATA / "filters" / f"{need_name()}.json"
+        n = qf.export(need_name(), out, combos.by_signature, store.name)
+        print(f"{n} combos of filter {args.name} written to {out}")
+        return 0
+    raise ValueError(f"unknown filter action {args.action}")
+
+
+def cmd_recheck(args) -> int:
+    from deepyugioh import settings
+    from deepyugioh.cards.store import CardStore
+    from deepyugioh.generator.recheck import ZONES, recheck
+    from deepyugioh.repository.combo_db import ComboRepository
+
+    repo, store = ComboRepository(), CardStore()
+    workers = args.workers or settings.analysis_workers()
+    out = recheck(repo, CardStore, workers=workers, apply=args.apply, repo=repo,
+                  progress=lambda i, n: print(f"  {i}/{n} combos replayed", flush=True))
+    print(f"{out['checked']} combos replayed: {out['unchanged']} unchanged, {len(out['changed'])} with other requirements, "
+          f"{len(out['drift'])} with another signature only, {len(out['errors'])} errors")
+    for ch in out["changed"][: args.limit]:
+        diff = []
+        for z in ZONES:
+            if ch["old"][z] != ch["new"][z]:
+                diff.append(f"{z}: {', '.join(store.name(c) for c in ch['old'][z]) or '-'} -> "
+                            f"{', '.join(store.name(c) for c in ch['new'][z]) or '-'}")
+        print(f"  #{ch['id']} {'; '.join(diff)}" + (f"  [{ch['result']}]" if "result" in ch else ""))
+    if len(out["changed"]) > args.limit:
+        print(f"  ... {len(out['changed']) - args.limit} more")
+    for e in out["errors"][:10]:
+        print(f"  error: {e}")
+    if out["drift"]:
+        print(f"  signature only: {out['drift'][:20]}")
+    if args.apply:
+        print(f"Database 1 corrected: {out['updated']} updated, {out['merged']} merged into an existing combo - "
+              "run `deepyugioh analyze` to evaluate them again")
+    elif out["changed"]:
+        print("nothing written - run again with --apply to correct Database 1")
+    return 0
 
 
 def cmd_testmode(args) -> int:
@@ -455,7 +615,7 @@ def cmd_gui(args) -> int:
     from deepyugioh.gui import run_gui
 
     try:
-        return run_gui()
+        return run_gui(args.stage)
     except tkinter.TclError as e:
         print(f"error: cannot open the GUI ({e}) - is a display available?", file=sys.stderr)
         return 2
@@ -532,11 +692,54 @@ def main(argv: list[str] | None = None) -> int:
 
     an = sub.add_parser("analyze", help="Stufe 2: evaluate the combos of Database 1 (incremental) into Database 2")
     an.add_argument("--full", action="store_true", help="recompute every axis for every combo")
+    an.add_argument("--no-engine", action="store_true", help="skip the engine replay of the lines (line facts)")
+    an.add_argument("--workers", type=int, help="worker processes for the engine replay")
     an.set_defaults(fn=cmd_analyze)
 
+    rc = sub.add_parser("recheck", help="replay every combo of Database 1 and determine its required cards again")
+    rc.add_argument("--apply", action="store_true", help="correct Database 1 (default: only report)")
+    rc.add_argument("--workers", type=int)
+    rc.add_argument("--limit", type=int, default=40, help="changed combos listed")
+    rc.set_defaults(fn=cmd_recheck)
+
+    rb = sub.add_parser("robustness", help="Stufe 2: search every combo against handtraps with the engine (resumable)")
+    rb.add_argument("action", choices=["run", "stats"])
+    rb.add_argument("--max-combos", type=int, help="stop after this many combos (strongest first)")
+    rb.add_argument("--time-budget", type=float, help="stop starting new combos after this many seconds")
+    rb.add_argument("--combo", type=int, nargs="+", help="only these combo ids of Database 1")
+    rb.add_argument("--retry-incomplete", action="store_true", help="search incomplete results again (e.g. with higher limits)")
+    rb.add_argument("--workers", type=int)
+    rb.add_argument("--report-every", type=int, default=10)
+    rb.set_defaults(fn=cmd_robustness)
+
+    fl = sub.add_parser("filter", help="quality filter: stored filter profiles and their ranked combos")
+    fl.add_argument("action", choices=["list", "save", "run", "show", "export", "delete"])
+    fl.add_argument("name", nargs="?", help="profile name")
+    fl.add_argument("--label")
+    fl.add_argument("--min", nargs="+", metavar="AXIS=VALUE",
+                    help="least score 0-100 of an axis or scoring (strength=70) or least raw value (outcome.disruptions=1)")
+    fl.add_argument("--rank-by", default="strength", help="axis or scoring the members are ordered by")
+    fl.add_argument("--weight", nargs="+", metavar="COMPONENT=WEIGHT", help="own ranking instead of --rank-by")
+    fl.add_argument("--archetype", nargs="+")
+    fl.add_argument("--race", nargs="+")
+    fl.add_argument("--attribute", nargs="+")
+    fl.add_argument("--min-fit", type=float, help="least fit 0-100 to the deck profile")
+    fl.add_argument("--locks", choices=["any", "none", "fitting"], default="any",
+                    help="none: no certain restriction; fitting: only restrictions the deck profile satisfies")
+    fl.add_argument("--min-cards", type=int)
+    fl.add_argument("--max-cards", type=int)
+    fl.add_argument("--late", action="store_true", help="only combos from later game situations")
+    fl.add_argument("--no-late", action="store_true", help="only combos that start from the opening hand")
+    fl.add_argument("--keep-dominated", action="store_true", help="keep combos another combo of their family beats")
+    fl.add_argument("--limit", type=int, help="save: keep only the best N; show: rows shown")
+    fl.add_argument("--out", help="export: file (default data/filters/NAME.json)")
+    fl.set_defaults(fn=cmd_filter)
+
     ar = sub.add_parser("analysis", help="read Database 2: stats, the profile of one combo, best combos of an axis")
-    ar.add_argument("action", choices=["stats", "show", "top", "card", "fit", "rescore", "weights"])
-    ar.add_argument("--combo", type=int, help="show: combo id in Database 1")
+    ar.add_argument("action", choices=["stats", "show", "top", "card", "fit", "rescore", "weights", "compat", "robust"])
+    ar.add_argument("--combo", type=int, help="show, compat, robust: combo id in Database 1")
+    ar.add_argument("--with", dest="other", type=int, help="compat: second combo id - the exact relation of the pair")
+    ar.add_argument("--kind", choices=["shared_cards", "archetype", "lock_conflict"], help="compat: only this kind of edge")
     ar.add_argument("--card", help="card: card name or code")
     ar.add_argument("--archetype", nargs="+", help="fit: deck archetypes, e.g. Blue-Eyes")
     ar.add_argument("--race", nargs="+", help="fit: monster types, e.g. Dragon")
@@ -550,7 +753,9 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("state", nargs="?", choices=["on", "off"])
     t.set_defaults(fn=cmd_testmode)
 
-    sub.add_parser("gui", help="test GUI: tune the generator, read results (test mode only)").set_defaults(fn=cmd_gui)
+    gu = sub.add_parser("gui", help="test GUI (test mode only): stage 1 = Combo Generator, stage 2 = Analyzer System")
+    gu.add_argument("--stage", type=int, choices=[1, 2], default=1)
+    gu.set_defaults(fn=cmd_gui)
 
     args = p.parse_args(argv)
     try:

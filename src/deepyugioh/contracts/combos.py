@@ -14,7 +14,8 @@ from typing import Iterator, Protocol, Sequence, runtime_checkable
 
 from deepyugioh.contracts.setups import StartSetup
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3   # 3: cards a combo needs in the GY, banished or on the field (later game situations)
+RESOURCE_ZONES = ("grave", "banished", "field")
 
 BENEFIT_CRITERIA = ("lp_gain", "opp_lp_loss", "hand_delta", "field_delta", "opp_field_loss", "opp_hand_loss")
 
@@ -44,14 +45,23 @@ class ComboRecord:
     validated: bool                 # replayed independently with identical result
     schema_version: int = SCHEMA_VERSION
     id: int | None = field(default=None, compare=False)
+    # later game situations: cards the combo uses that are already there when the turn starts
+    grave: tuple[int, ...] = ()     # in the own GY
+    banished: tuple[int, ...] = ()  # banished
+    field: tuple[int, ...] = ()     # on the own field
+
+    @property
+    def resources(self) -> tuple[int, ...]:
+        """Required cards that are not in hand, deck or extra deck at the start (empty for opening combos)."""
+        return tuple(sorted(self.grave + self.banished + self.field))
 
     @property
     def cards(self) -> tuple[int, ...]:
-        return tuple(sorted(self.hand + self.deck + self.extra))
+        return tuple(sorted(self.hand + self.deck + self.extra + self.resources))
 
     @property
     def card_count(self) -> int:
-        return len(self.hand) + len(self.deck) + len(self.extra)
+        return len(self.hand) + len(self.deck) + len(self.extra) + len(self.resources)
 
 
 @dataclass(frozen=True)

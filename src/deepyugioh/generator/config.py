@@ -34,8 +34,9 @@ TIERS = {
     5: "AIDE forward planning: multi-card chains from every starter card",
     6: "AIDE backward planning: chains that bring a card to where its effect works",
     7: "HYBRID: tiers 1-4 interleaved with AIDE plans (share: aide_share)",
+    8: "LATE GAME: a card with an effect in the GY / banished / on the field lies there, small hand",
 }
-DEFAULT_TIERS = (1, 2, 3, 4)  # the AIDE tiers 5-7 are opt-in
+DEFAULT_TIERS = (1, 2, 3, 4)  # the AIDE tiers 5-7 and the late game tier 8 are opt-in
 
 # Opponent boards are made of vanilla monsters and Normal Spells: they give our
 # effects something to target but can never be activated during our turn.
@@ -63,6 +64,8 @@ class CandidateConfig:
     aide_branching: int = 4        # cards tried per effect move while planning
     aide_neighbors: int = 0        # extra deck-neighbourhood cards added to a plan's setup
     aide_helpers: bool = False     # add the same generic helpers as tiers 1-4 (benchmark: slower, fewer combos)
+    # later game situations (tier 8)
+    late_zones: tuple[str, ...] = ("grave", "banished")   # where resource cards start; "field" is optional
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,8 @@ class GeneratorConfig:
             errors.append("candidates.aide_share must be between 0 and 1")
         if cand.aide_plans_per_card < 1 or cand.aide_branching < 1 or cand.aide_neighbors < 0:
             errors.append("candidates.aide_plans_per_card and aide_branching must be >= 1, aide_neighbors >= 0")
+        if not cand.late_zones or set(cand.late_zones) - {"grave", "banished", "field"}:
+            errors.append("candidates.late_zones must be a non-empty subset of grave, banished, field")
         if self.workers < 1:
             errors.append("workers must be >= 1")
         if errors:

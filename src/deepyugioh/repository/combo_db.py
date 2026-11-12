@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Iterator, Sequence
 
 from deepyugioh import paths
-from deepyugioh.contracts.combos import SCHEMA_VERSION, ComboRecord, LineStep, RunRecord, StoreResult
+from deepyugioh.contracts.combos import RESOURCE_ZONES, SCHEMA_VERSION, ComboRecord, LineStep, RunRecord, StoreResult
 from deepyugioh.contracts.setups import StartSetup
 
 SCHEMA = """
@@ -63,13 +63,14 @@ CREATE TABLE IF NOT EXISTS combos (
     setup          TEXT NOT NULL,   -- JSON StartSetup the line replays in
     validated      INTEGER NOT NULL,
     first_run      INTEGER NOT NULL REFERENCES runs(id),
-    created_at     TEXT NOT NULL
+    created_at     TEXT NOT NULL,
+    resources      TEXT NOT NULL DEFAULT '{}'   -- JSON {grave|banished|field: codes} (schema 3, later game situations)
 );
 CREATE INDEX IF NOT EXISTS combos_size ON combos(card_count, action_count);
 CREATE TABLE IF NOT EXISTS combo_cards (
     combo_id INTEGER NOT NULL REFERENCES combos(id),
     code     INTEGER NOT NULL,
-    role     TEXT NOT NULL CHECK (role IN ('hand', 'deck', 'extra')),
+    role     TEXT NOT NULL CHECK (role IN ('hand', 'deck', 'extra', 'grave', 'banished', 'field')),
     copies   INTEGER NOT NULL,
     PRIMARY KEY (combo_id, code, role)
 );
@@ -113,8 +114,34 @@ class ComboRepository:
                 raise SchemaMismatch(f"{path} has no schema version - created by an older generator")
             self.db.execute("INSERT INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
             self.db.commit()
+        elif int(row[0]) == 2 and SCHEMA_VERSION == 3:
+            self._migrate_2_to_3()
         elif int(row[0]) != SCHEMA_VERSION:
             raise SchemaMismatch(f"{path} uses schema {row[0]}, this code writes schema {SCHEMA_VERSION}")
+
+    def _migrate_2_to_3(self):
+        """Schema 3 adds the cards a combo needs in the GY, banished or on the field. Existing combos need
+        none, so nothing stored changes: one new column with an empty default, and combo_cards accepts the
+        new roles (SQLite cannot change a CHECK, the table is copied). One transaction - all or nothing."""
+        self.db.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self.db:
+                self.db.execute("BEGIN")
+                cols = {r[1] for r in self.db.execute("PRAGMA table_info(combos)")}
+                if "resources" not in cols:
+                    self.db.execute("ALTER TABLE combos ADD COLUMN resources TEXT NOT NULL DEFAULT '{}'")
+                self.db.execute("ALTER TABLE combo_cards RENAME TO combo_cards_v2")
+                self.db.execute("DROP INDEX IF EXISTS combo_cards_code")
+                self.db.execute(
+                    "CREATE TABLE combo_cards (combo_id INTEGER NOT NULL REFERENCES combos(id), code INTEGER NOT NULL,"
+                    " role TEXT NOT NULL CHECK (role IN ('hand', 'deck', 'extra', 'grave', 'banished', 'field')),"
+                    " copies INTEGER NOT NULL, PRIMARY KEY (combo_id, code, role))")
+                self.db.execute("INSERT INTO combo_cards SELECT combo_id, code, role, copies FROM combo_cards_v2")
+                self.db.execute("DROP TABLE combo_cards_v2")
+                self.db.execute("CREATE INDEX combo_cards_code ON combo_cards(code)")
+                self.db.execute("UPDATE meta SET value = '3' WHERE key = 'schema_version'")
+        finally:
+            self.db.execute("PRAGMA foreign_keys = ON")
 
     # ---- ComboSink --------------------------------------------------------
     def store_run(self, run: RunRecord, combos: Sequence[ComboRecord]) -> StoreResult:
@@ -149,17 +176,19 @@ class ComboRepository:
     def _insert(self, c: ComboRecord, run_id: int) -> int:
         cid = self.db.execute(
             "INSERT INTO combos (signature, schema_version, card_count, cards, hand, deck, extra, benefit, positive,"
-            " end_board, turn_ended, action_count, line, setup, validated, first_run, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " end_board, turn_ended, action_count, line, setup, validated, first_run, created_at, resources)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 c.signature, c.schema_version, c.card_count, json.dumps(c.cards), json.dumps(c.hand),
                 json.dumps(c.deck), json.dumps(c.extra), json.dumps(c.benefit), json.dumps(c.positive),
                 json.dumps(c.end_board), int(c.turn_ended), len(c.line),
                 json.dumps([s.to_dict() for s in c.line]), json.dumps(c.setup.to_dict()), int(c.validated),
                 run_id, _now(),
+                json.dumps({z: list(getattr(c, z)) for z in RESOURCE_ZONES if getattr(c, z)}),
             ),
         ).lastrowid
-        for role, codes in (("hand", c.hand), ("deck", c.deck), ("extra", c.extra)):
+        for role, codes in (("hand", c.hand), ("deck", c.deck), ("extra", c.extra), ("grave", c.grave),
+                            ("banished", c.banished), ("field", c.field)):
             for code in sorted(set(codes)):
                 self.db.execute("INSERT INTO combo_cards VALUES (?,?,?,?)", (cid, code, role, codes.count(code)))
         for crit in c.positive:
@@ -167,11 +196,14 @@ class ComboRepository:
         return cid
 
     # ---- ComboReader ------------------------------------------------------
-    _COLS = "id, signature, schema_version, hand, deck, extra, benefit, positive, end_board, turn_ended, line, setup, validated"
+    _COLS = ("id, signature, schema_version, hand, deck, extra, benefit, positive, end_board, turn_ended, line, setup,"
+             " validated, resources")
 
     def _record(self, row) -> ComboRecord:
-        (cid, sig, ver, hand, deck, extra, benefit, positive, board, ended, line, setup, validated) = row
+        (cid, sig, ver, hand, deck, extra, benefit, positive, board, ended, line, setup, validated, resources) = row
+        res = json.loads(resources) if resources and resources != "{}" else {}
         return ComboRecord(
+            grave=tuple(res.get("grave", ())), banished=tuple(res.get("banished", ())), field=tuple(res.get("field", ())),
             signature=sig, hand=tuple(json.loads(hand)), deck=tuple(json.loads(deck)), extra=tuple(json.loads(extra)),
             benefit=json.loads(benefit), positive=tuple(json.loads(positive)), end_board=json.loads(board),
             turn_ended=bool(ended), line=tuple(LineStep(**s) for s in json.loads(line)),
@@ -205,6 +237,36 @@ class ComboRepository:
 
     def count(self) -> int:
         return self.db.execute("SELECT COUNT(*) FROM combos").fetchone()[0]
+
+    # ---- maintenance: corrected requirements (deepyugioh recheck) -----------------------------
+    def correct_requirements(self, combo_id: int, req, signature: str) -> str:
+        """Store corrected requirements of a combo (same line, same end board). If a combo with the
+        corrected identity already exists, the two are the same combo: the runs are linked to the
+        existing one and this record is removed. Returns "updated" or "merged". One transaction."""
+        zones = {"hand": req.hand, "deck": req.deck, "extra": req.extra, "grave": req.grave,
+                 "banished": req.banished, "field": req.field}
+        with self.db:
+            other = self.db.execute("SELECT id FROM combos WHERE signature = ? AND id != ?", (signature, combo_id)).fetchone()
+            if other is not None:
+                self.db.execute("INSERT OR IGNORE INTO combo_runs SELECT ?, run_id FROM combo_runs WHERE combo_id = ?",
+                                (other[0], combo_id))
+                for table in ("combo_runs", "combo_cards", "combo_benefits"):
+                    self.db.execute(f"DELETE FROM {table} WHERE combo_id = ?", (combo_id,))
+                self.db.execute("DELETE FROM combos WHERE id = ?", (combo_id,))
+                return "merged"
+            self.db.execute(
+                "UPDATE combos SET signature=?, card_count=?, cards=?, hand=?, deck=?, extra=?, resources=? WHERE id=?",
+                (signature, req.count, json.dumps(req.cards), json.dumps(req.hand), json.dumps(req.deck),
+                 json.dumps(req.extra), json.dumps({z: list(zones[z]) for z in RESOURCE_ZONES if zones[z]}), combo_id))
+            self.db.execute("DELETE FROM combo_cards WHERE combo_id = ?", (combo_id,))
+            for role, codes in zones.items():
+                for code in sorted(set(codes)):
+                    self.db.execute("INSERT INTO combo_cards VALUES (?,?,?,?)", (combo_id, code, role, codes.count(code)))
+        return "updated"
+
+    def by_signature(self, signature: str) -> ComboRecord | None:
+        row = self.db.execute(f"SELECT {self._COLS} FROM combos WHERE signature = ?", (signature,)).fetchone()
+        return self._record(row) if row else None
 
     def runs_for(self, combo_id: int) -> list[dict]:
         rows = self.db.execute(

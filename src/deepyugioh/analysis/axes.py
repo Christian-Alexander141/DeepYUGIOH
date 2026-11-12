@@ -110,8 +110,12 @@ class OutcomeAnalyzer:
         return False
 
     def analyze(self, combo: ComboRecord) -> AxisResult:
-        own = combo.end_board["players"][0]
-        b = combo.benefit
+        raw, value = self.evaluate(combo.end_board, combo.benefit)
+        return AxisResult(raw, value, self.explain(raw))
+
+    def evaluate(self, end_board: dict, b: dict) -> tuple[dict, float]:
+        """(raw facts, value) of an end board and its benefit - also the measure of the robustness search."""
+        own = end_board["players"][0]
         monsters = [c for c in own["mzone"]]
         atk = []
         for c in monsters:
@@ -140,7 +144,11 @@ class OutcomeAnalyzer:
                                   + (10 if raw["wins"] else 0), 3)
         terms = dict(raw, opp_lp_loss_k=raw["opp_lp_loss"] / 1000, atk_total_k=raw["atk_total"] / 1000,
                      disruptions=raw["disruptions"] - negates, wins=1.0 if raw["wins"] else 0.0)
-        value = sum(w * float(terms[k]) for k, w in self.WEIGHTS.items())
+        return raw, round(sum(w * float(terms[k]) for k, w in self.WEIGHTS.items()), 4)
+
+    @staticmethod
+    def explain(raw: dict) -> str:
+        negates, unclear = raw["negates"], raw["unclear_disruptions"]
         parts = []
         if raw["wins"]:
             parts.append("gewinnt das Duell")
@@ -156,7 +164,7 @@ class OutcomeAnalyzer:
         if raw["opp_lp_loss"]:
             parts.append(f"{raw['opp_lp_loss']} Schaden")
         parts.append(f"Kartenvorteil {raw['card_advantage']:+d}")
-        return AxisResult(raw, round(value, 4), ", ".join(parts))
+        return ", ".join(parts)
 
 
 # ---- cost -----------------------------------------------------------------------------
@@ -164,9 +172,10 @@ class CostAnalyzer:
     """Einsatz: what the combo needs. Higher value = cheaper."""
 
     name = "cost"
-    version = "1"
+    version = "2"   # 2: resources (cards needed in the GY, banished, on the field), hand_independence
     global_ = False
-    WEIGHTS = {"hand": 2.0, "deck": 1.0, "extra": 0.5, "actions": 0.05, "lp_paid_k": 1.0, "normal_summon": 0.5}
+    WEIGHTS = {"hand": 2.0, "deck": 1.0, "extra": 0.5, "resources": 1.5, "actions": 0.05, "lp_paid_k": 1.0,
+               "normal_summon": 0.5}
 
     def prepare(self, combos: Iterable[ComboRecord]) -> None:
         pass
@@ -180,10 +189,14 @@ class CostAnalyzer:
         raw = {
             "cards": combo.card_count, "hand": len(combo.hand), "deck": len(combo.deck), "extra": len(combo.extra),
             "actions": actions, "lp_paid": lp_paid, "normal_summon": normal_summon,
+            "resources": len(combo.resources),
+            "hand_independence": -len(combo.hand),   # fewer hand cards needed = works with a small hand
         }
         terms = dict(raw, lp_paid_k=lp_paid / 1000, normal_summon=1.0 if normal_summon else 0.0)
         value = -sum(w * float(terms[k]) for k, w in self.WEIGHTS.items())
-        text = (f"{raw['cards']} Karten ({raw['hand']} Hand, {raw['deck']} Deck, {raw['extra']} Extra Deck), "
+        res = (f", {len(combo.grave)} Friedhof, {len(combo.banished)} verbannt, {len(combo.field)} Feld"
+               if combo.resources else "")
+        text = (f"{raw['cards']} Karten ({raw['hand']} Hand, {raw['deck']} Deck, {raw['extra']} Extra Deck{res}), "
                 f"{actions} Aktionen" + (f", {lp_paid} LP" if lp_paid else "")
                 + (", verbraucht die Normalbeschwörung" if normal_summon else ""))
         return AxisResult(raw, round(value, 4), text)
@@ -221,7 +234,7 @@ class ConsistencyAnalyzer:
     """Konsistenz: chance to open the hand cards of the combo - or of any combo of its family."""
 
     name = "consistency"
-    version = "3"
+    version = "4"   # 4: combos that need resources cannot be opened (later game situations)
     global_ = True   # depends on the other members of the family
 
     def __init__(self, deck: DeckModel = DeckModel()):
@@ -232,6 +245,8 @@ class ConsistencyAnalyzer:
     def prepare(self, combos: Iterable[ComboRecord]) -> None:
         fam = defaultdict(set)
         for c in combos:
+            if c.resources:
+                continue   # needs cards in the GY / banished / on the field: not a way to open the result
             fam[family_key(c)].add(tuple(sorted(hand_requirement(c)[0].elements())))
         self.families = {k: [Counter(h) for h in sorted(v)] for k, v in fam.items()}
         self._family_p = {}
@@ -262,6 +277,19 @@ class ConsistencyAnalyzer:
         d = self.deck
         req, fallback = hand_requirement(combo)
         key = family_key(combo)
+        if combo.resources:
+            # a later game combo: the opening hand cannot provide it. Its family may still open the same result.
+            fam_first = self.family_probability(key, d.hand_first)[0] if key in self.families else 0.0
+            fam_second = self.family_probability(key, d.hand_second)[0] if key in self.families else 0.0
+            raw = {"hand_cards": sum(req.values()), "own_first": 0.0, "own_second": 0.0, "family": key,
+                   "family_size": len(self.families.get(key, [])), "family_first": round(fam_first, 6),
+                   "family_second": round(fam_second, 6), "family_truncated": False, "family_members_used": 0,
+                   "hand_from_setup": False, "needs_resources": True,
+                   "deck_model": {"deck_size": d.deck_size, "copies": d.copies, "hand_first": d.hand_first,
+                                  "hand_second": d.hand_second}}
+            text = (f"späteres Spiel: braucht {len(combo.resources)} Karte(n) im Friedhof, verbannt oder auf dem Feld, "
+                    f"als Starthand nicht möglich; dasselbe Ergebnis aus der Starthand: {fam_first:.1%}")
+            return AxisResult(raw, round(fam_first, 6), text, profile={"family": key})
         own_first, own_second = self._p(req, d.hand_first), self._p(req, d.hand_second)
         fam_first, truncated, used = self.family_probability(key, d.hand_first) if key in self.families else (own_first, False, 1)
         fam_second, _, _ = self.family_probability(key, d.hand_second) if key in self.families else (own_second, False, 1)

@@ -12,14 +12,23 @@ Concept and roadmap: docs/stufe2-konzept.md. Database 1 is only read.
 from deepyugioh.analysis.axes import (
     ConsistencyAnalyzer, CostAnalyzer, DeckModel, OutcomeAnalyzer, default_analyzers, family_key,
 )
+from deepyugioh.analysis.compatibility import CompatibilityIndex, CompatibilitySettings, load_index, run_compatibility
+from deepyugioh.analysis.filters import DEFAULT_PROFILES, FilterProfile, FilterResult, QualityFilter
+from deepyugioh.analysis.linefacts import line_facts, run_line_facts
+from deepyugioh.analysis.robustness import (
+    DEFAULT_CATALOG, AdversarialSearch, RobustnessSettings, analyse_combo, build_axis, run_robustness,
+)
 from deepyugioh.analysis.specificity import (
-    CardProfiler, CardUniverse, DeckProfile, GenericnessAnalyzer, deck_fit, generic_scale,
+    CardProfiler, CardUniverse, DeckProfile, GenericnessAnalyzer, deck_fit, deck_profile_from_names, generic_scale,
 )
 from deepyugioh.analysis.store import AnalysisRepository, SchemaMismatch
 from deepyugioh.analysis.strength import DEFAULT_SCORINGS, Rescorer, Scoring, scorings_from_dict
 from deepyugioh.analysis.system import AnalysisReport, AnalyzerSystem, analyse_combos
 
 __all__ = [
+    "DEFAULT_CATALOG", "DEFAULT_PROFILES", "AdversarialSearch", "CompatibilityIndex", "CompatibilitySettings",
+    "FilterProfile", "FilterResult", "QualityFilter", "RobustnessSettings", "analyse_combo", "build_axis",
+    "deck_profile_from_names", "line_facts", "load_index", "run_compatibility", "run_line_facts", "run_robustness",
     "DEFAULT_SCORINGS", "Rescorer", "Scoring", "scorings_from_dict",
     "AnalysisReport", "AnalysisRepository", "AnalyzerSystem", "CardProfiler", "CardUniverse", "ConsistencyAnalyzer",
     "CostAnalyzer", "DeckModel", "DeckProfile", "GenericnessAnalyzer", "OutcomeAnalyzer", "SchemaMismatch",

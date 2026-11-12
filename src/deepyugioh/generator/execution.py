@@ -27,9 +27,42 @@ class Versions:
 
 
 def combo_signature(combo: FoundCombo) -> str:
-    r = combo.requirements
-    payload = json.dumps([list(r.hand), list(r.deck), list(r.extra), combo.identity], separators=(",", ":"))
+    return signature_of(combo.requirements, combo.identity)
+
+
+def signature_of(r, identity: tuple) -> str:
+    """Identity of a combo: its required cards and its end board relative to the start."""
+    parts = [list(r.hand), list(r.deck), list(r.extra), identity]
+    if r.resources:   # only for later game situations, so every older signature stays the same
+        parts += [list(r.grave), list(r.banished), list(r.field)]
+    payload = json.dumps(parts, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def recompute(pool: CardPool, record: ComboRecord):
+    """Replay a stored combo and determine its requirements and signature again with the current rules.
+    Returns (Requirements, signature); raises EngineError if the line no longer replays."""
+    from deepyugioh.engine import constants as K
+    from deepyugioh.engine.duel import Duel, EngineError
+    from deepyugioh.generator.search.actions import Enumerator
+    from deepyugioh.generator.search.combo import requirements, unused_resources
+
+    enum = Enumerator(names=pool.name)
+    with Duel(pool, record.setup) as duel:
+        start = None
+        for step in record.line:
+            if duel.advance(enum.default_response) is None:
+                raise EngineError("line ends early in the replay")
+            if start is None:
+                start = duel.board()
+            duel.respond(bytes.fromhex(step.response))
+        duel.advance(enum.default_response)
+        end = duel.board()
+        if start is None:
+            start = end
+        req = requirements(record.setup, end, duel.events)
+    link = any((c := pool.get(x.code)) is not None and c.type & K.TYPE_LINK for x in end.players[0].mzone)
+    return req, signature_of(req, end.identity(start, link, unused_resources(record.setup, req)))
 
 
 def to_record(combo: FoundCombo, setup: StartSetup, validated: bool) -> ComboRecord:
@@ -46,6 +79,9 @@ def to_record(combo: FoundCombo, setup: StartSetup, validated: bool) -> ComboRec
         line=tuple(LineStep(s.decision, s.label, s.response.hex()) for s in combo.line),
         setup=setup,
         validated=validated,
+        grave=r.grave,
+        banished=r.banished,
+        field=r.field,
     )
 
 

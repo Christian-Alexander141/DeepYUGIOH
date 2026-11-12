@@ -24,11 +24,11 @@ from deepyugioh.contracts.combos import (
     RunRecord,
     StoreResult,
 )
-from deepyugioh.contracts.setups import EMPTY_BOARD, Candidate, OpponentBoard, OpponentCard, StartSetup
+from deepyugioh.contracts.setups import EMPTY_BOARD, Candidate, FieldCard, OpponentBoard, OpponentCard, StartSetup
 
 __all__ = [
     "BENEFIT_CRITERIA", "EMPTY_BOARD", "SCHEMA_VERSION", "Candidate", "CardInfo", "CardPool",
-    "ComboReader", "ComboRecord", "ComboSink", "EnablerRole", "Interaction", "InteractionGrade",
+    "ComboReader", "ComboRecord", "ComboSink", "EnablerRole", "FieldCard", "Interaction", "InteractionGrade",
     "InteractionGraph", "LineStep", "OpponentBoard", "OpponentCard", "RunRecord", "StartSetup",
     "StoreResult",
 ]

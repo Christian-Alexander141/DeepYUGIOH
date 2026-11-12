@@ -252,12 +252,12 @@ class Sidebar:
         self.frame.pack_propagate(False)
         self.brand = tk.Label(self.frame, text="DeepYUGIOH", font=t.fonts["brand"], anchor="w", padx=22)
         self.brand.pack(fill="x", pady=(24, 0))
-        self.sub = tk.Label(self.frame, text="Combo Generator", font=t.fonts["base"], anchor="w", padx=22)
+        self.sub = tk.Label(self.frame, text=app.SUBTITLE, font=t.fonts["base"], anchor="w", padx=22)
         self.sub.pack(fill="x")
         self.badge = tk.Label(self.frame, text="TESTMODUS", font=t.fonts["bold"], padx=8, pady=2)
         self.badge.pack(anchor="w", padx=22, pady=(12, 22))
         self.items: dict[str, NavItem] = {}
-        for key, title, _ in PAGES:
+        for key, title, _ in app.PAGES:
             item = NavItem(self.frame, t, title, lambda k=key: app.show(k))
             item.row.pack(fill="x")
             self.items[key] = item
@@ -358,6 +358,14 @@ class Header:
 
 # ---- application ---------------------------------------------------------------
 class App:
+    """Shell of a test GUI: sidebar, header, pages, background tasks. The Combo Generator's pages are built
+    here; the GUI of another stage subclasses it and overrides PAGES, SUBTITLE, _make_header, _build_pages,
+    _unsaved_changes and _stop_work (see gui/analysis.py)."""
+
+    PAGES = PAGES
+    SUBTITLE = "Combo Generator"
+    TITLE = "DeepYUGIOH - Testmodus"
+
     def __init__(self, root: tk.Tk):
         from deepyugioh.cards.store import CardStore
         from deepyugioh.repository.combo_db import ComboRepository
@@ -370,7 +378,7 @@ class App:
         self.busy: str | None = None
         self.closing = False
         self.busy_listeners: list[Callable[[], None]] = []
-        self.current = "settings"
+        self.current = self.PAGES[0][0]
 
         try:
             self.saved = settings.generator_config()
@@ -378,14 +386,14 @@ class App:
             messagebox.showerror("Einstellungen", f"{settings.settings_path()} ist ungültig:\n{e}\n\nEs gelten die Standardwerte.")
             self.saved = GeneratorConfig()
 
-        root.title("DeepYUGIOH - Testmodus")
+        root.title(self.TITLE)
         root.geometry("1480x940")
         root.minsize(1150, 700)
 
         self.sidebar = Sidebar(self)
         main = ttk.Frame(root, style="Page.TFrame")
         main.pack(side="left", fill="both", expand=True)
-        self.header = Header(self, main)
+        self.header = self._make_header(main)
         self.content = ttk.Frame(main, style="Page.TFrame")
         self.content.pack(fill="both", expand=True)
         self.content.rowconfigure(0, weight=1)
@@ -395,21 +403,34 @@ class App:
         self.status = tk.StringVar(value="bereit")
         ttk.Label(bar, textvariable=self.status, style="PageMuted.TLabel").pack(side="left")
 
+        self.pages = self._build_pages()
+        for page in self.pages.values():
+            page.frame.grid(row=0, column=0, sticky="nsew")
+        self.busy_listeners.append(self.header.refresh)
+        self.show(self.PAGES[0][0])
+        self.header.refresh()
+
+        root.protocol("WM_DELETE_WINDOW", self.close)
+        root.after(100, self._poll)
+
+    # ---- hooks for the GUIs of other stages ----------------------------------------------
+    def _make_header(self, parent):
+        return Header(self, parent)
+
+    def _build_pages(self) -> dict:
         self.settings_tab = SettingsTab(self)
         self.search_tab = SearchTab(self)
         self.global_tab = GlobalTab(self)
         self.combos_tab = CombosTab(self)
         self.runs_tab = RunsTab(self)
-        self.pages = {"settings": self.settings_tab, "search": self.search_tab, "global": self.global_tab,
-                      "combos": self.combos_tab, "runs": self.runs_tab}
-        for page in self.pages.values():
-            page.frame.grid(row=0, column=0, sticky="nsew")
-        self.busy_listeners.append(self.header.refresh)
-        self.show("settings")
-        self.header.refresh()
+        return {"settings": self.settings_tab, "search": self.search_tab, "global": self.global_tab,
+                "combos": self.combos_tab, "runs": self.runs_tab}
 
-        root.protocol("WM_DELETE_WINDOW", self.close)
-        root.after(100, self._poll)
+    def _unsaved_changes(self) -> bool:
+        return self.settings_tab.dirty
+
+    def _stop_work(self):
+        self.global_tab.stop()
 
     # ---- navigation ------------------------------------------------------------------
     def show(self, key: str):
@@ -417,7 +438,7 @@ class App:
         page = self.pages[key]
         page.frame.tkraise()
         self.sidebar.select(key)
-        _, title, subtitle = next(p for p in PAGES if p[0] == key)
+        _, title, subtitle = next(p for p in self.PAGES if p[0] == key)
         self.header.set_page(title, subtitle)
         if getattr(page, "loaded", True) is False:  # first visit; afterwards via the refresh buttons
             page.loaded = True
@@ -507,7 +528,7 @@ class App:
             pass
 
     def close(self):
-        if self.settings_tab.dirty and not messagebox.askyesno(
+        if self._unsaved_changes() and not messagebox.askyesno(
             "Ungespeicherte Einstellungen", "Die Einstellungen wurden geändert, aber nicht gespeichert. Trotzdem beenden?"
         ):
             return
@@ -518,7 +539,7 @@ class App:
             ):
                 return
             self.closing = True
-            self.global_tab.stop()
+            self._stop_work()
             self.status.set("wird beendet, sobald die laufenden Suchen fertig sind ...")
             return
         self.root.destroy()
@@ -840,8 +861,17 @@ class SearchTab:
             box.grid(row=1, column=col, sticky="nsew", padx=(0 if col == 0 else 10, 0), pady=(4, 0))
             body.columnconfigure(col, weight=1, uniform="lists")
             self.lists[key] = box
+        # later game situations: what player 0 already has when the turn starts
+        for col, (key, label) in enumerate((("grave", "Schon im Friedhof"), ("banished", "Schon verbannt"),
+                                            ("field", "Schon auf dem Feld"))):
+            ttk.Label(body, text=label, style="Muted.TLabel").grid(row=2, column=col, sticky="w", pady=(8, 0),
+                                                                   padx=(0 if col == 0 else 10, 0))
+            box = tk.Text(body, height=2, width=30, undo=True, font=app.theme.fonts["base"])
+            app.theme.register(box, "text")
+            box.grid(row=3, column=col, sticky="nsew", padx=(0 if col == 0 else 10, 0), pady=(4, 0))
+            self.lists[key] = box
         opts = ttk.Frame(body)
-        opts.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        opts.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12, 0))
         ttk.Label(opts, text="Gegnerfeld").pack(side="left")
         self.opponent = tk.StringVar(value="empty")
         self.opponent_box = ttk.Combobox(opts, textvariable=self.opponent, state="readonly", width=14)
@@ -899,14 +929,27 @@ class SearchTab:
 
     def load_setup(self, setup: StartSetup):
         name = self.app.store.name
-        for key in ("hand", "deck", "extra"):
+        for key in ("hand", "deck", "extra", "grave", "banished"):
             set_text(self.lists[key], fmt.card_list_text(getattr(setup, key), name), readonly=False)
+        set_text(self.lists["field"], fmt.card_list_text([c.code for c in setup.field], name), readonly=False)
+        self._field = {c.code: c for c in setup.field}   # keeps zone and position of loaded field cards
         boards = self.opponent_box.cget("values")
         if setup.opponent.name in boards:
             self.opponent.set(setup.opponent.name)
         else:
             messagebox.showwarning("Gegnerfeld", f"Gegnerfeld '{setup.opponent.name}' ist in den Einstellungen nicht definiert.")
         self.branch_zones.set(setup.branch_zones)
+
+    def _field_card(self, code: int):
+        """A card typed into "Schon auf dem Feld": as loaded, else monsters face-up in a monster zone,
+        spells and traps face-up in a spell/trap zone."""
+        from deepyugioh.contracts.setups import FieldCard
+
+        known = getattr(self, "_field", {}).get(code)
+        if known is not None:
+            return known
+        card_ = self.app.store.get(code)
+        return FieldCard(code, "mzone" if card_ is not None and card_.type & 0x1 else "szone")
 
     def _codes(self, key: str) -> tuple[int, ...]:
         refs = fmt.parse_card_list(self.lists[key].get("1.0", "end"))
@@ -926,11 +969,14 @@ class SearchTab:
             return
         try:
             hand = self._codes("hand")
-            if not hand:
+            field = tuple(self._field_card(c) for c in self._codes("field"))
+            grave, banished = self._codes("grave"), self._codes("banished")
+            if not hand and not (field or grave or banished):
                 raise ValueError("Die Hand ist leer.")
             boards = cfg.boards(self.app.store)
             setup = StartSetup(hand=hand, deck=self._codes("deck"), extra=self._codes("extra"),
-                               opponent=boards[self.opponent.get()], branch_zones=self.branch_zones.get())
+                               opponent=boards[self.opponent.get()], branch_zones=self.branch_zones.get(),
+                               grave=grave, banished=banished, field=field)
         except (ValueError, KeyError) as e:
             messagebox.showerror("Startaufbau", str(e).strip("'\""))
             return

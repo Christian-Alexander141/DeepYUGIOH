@@ -23,7 +23,7 @@ from deepyugioh.engine.messages import Decision, Event, Reader, parse_decision, 
 
 DUEL_FLAGS = K.DUEL_MODE_MR5 | K.DUEL_SIMPLE_AI | K.DUEL_PSEUDO_SHUFFLE
 
-_ZONES = {"mzone": K.LOCATION_MZONE, "szone": K.LOCATION_SZONE, "hand": K.LOCATION_HAND}
+_ZONES = {"mzone": K.LOCATION_MZONE, "szone": K.LOCATION_SZONE, "hand": K.LOCATION_HAND, "deck": K.LOCATION_DECK}
 _POSITIONS = {
     "faceup_attack": K.POS_FACEUP_ATTACK,
     "faceup_defense": K.POS_FACEUP_DEFENSE,
@@ -96,7 +96,7 @@ class BoardState:
             ))
         return (tuple(out), self.winner)
 
-    def identity(self, start: "BoardState", zones_matter: bool = True) -> tuple:
+    def identity(self, start: "BoardState", zones_matter: bool = True, unused=None) -> tuple:
         """Setup-independent identity of an end board relative to its start board.
 
         Player 0's side is taken as is; the opponent's side only as the change
@@ -106,6 +106,24 @@ class BoardState:
         field) the five main monster zones count as interchangeable.
         """
         own = self.key()[0][0]
+        if unused is not None and any(unused):
+            # later game setups: start cards the line never touched are not part of the combo
+            lp, hand, mz, sz, gy, ban = own
+            u_gy, u_ban, u_field = (Counter(u) for u in unused)
+
+            def without(codes, drop):
+                return tuple(sorted((Counter(codes) - drop).elements()))
+
+            def field_without(zone):
+                out = []
+                for entry in zone:
+                    if u_field[entry[1]] > 0:
+                        u_field[entry[1]] -= 1
+                    else:
+                        out.append(entry)
+                return tuple(out)
+
+            own = (lp, hand, field_without(mz), field_without(sz), without(gy, u_gy), without(ban, u_ban))
         if not zones_matter:
             lp, hand, mz, sz, gy, ban = own
             # main zones become "M", extra monster zones keep their number; the sort key keeps both
@@ -156,7 +174,9 @@ def _find_script(name: str) -> bytes | None:
 class Duel:
     """Owns one OCG_Duel. Use as a context manager or call close()."""
 
-    def __init__(self, store: CardPool, setup: StartSetup, log=None):
+    def __init__(self, store: CardPool, setup: StartSetup, log=None, simple_ai: bool = True):
+        """simple_ai=False: the core asks player 1 every decision (chains included) instead of answering
+        them itself - needed when the opponent is supposed to act (robustness analysis)."""
         self.lib = ocg.load_library()
         self.store = store
         self.setup = setup
@@ -178,7 +198,7 @@ class Duel:
         opts = ocg.OCGDuelOptions()
         for i, s in enumerate(setup.seed):
             opts.seed[i] = s
-        opts.flags = DUEL_FLAGS
+        opts.flags = DUEL_FLAGS if simple_ai else DUEL_FLAGS & ~K.DUEL_SIMPLE_AI
         opts.team1 = ocg.OCGPlayer(setup.starting_lp, 0, 1)
         opts.team2 = ocg.OCGPlayer(setup.starting_lp, 0, 1)
         opts.cardReader = self._card_reader
@@ -200,6 +220,9 @@ class Duel:
         self._add_cards(setup.hand, K.LOCATION_HAND)
         self._add_cards(setup.deck, K.LOCATION_DECK)
         self._add_cards(setup.extra, K.LOCATION_EXTRA)
+        self._add_cards(setup.grave, K.LOCATION_GRAVE, K.POS_FACEUP_ATTACK)
+        self._add_cards(setup.banished, K.LOCATION_REMOVED, K.POS_FACEUP_ATTACK)
+        self._add_field(setup)
         self._add_opponent(setup)
         self.lib.OCG_StartDuel(handle)
 
@@ -241,9 +264,24 @@ class Duel:
             self._log(kind, msg)
 
     # ---- setup ------------------------------------------------------------
-    def _add_cards(self, codes, location):
+    def _add_cards(self, codes, location, position=K.POS_FACEDOWN_DEFENSE):
         for code in codes:
-            info = ocg.OCGNewCardInfo(0, 0, code, 0, location, 0, K.POS_FACEDOWN_DEFENSE)
+            info = ocg.OCGNewCardInfo(0, 0, code, 0, location, 0, position)
+            self.lib.OCG_DuelNewCard(self.handle, C.byref(info))
+
+    def _add_field(self, setup: StartSetup):
+        """Cards player 0 already controls (later game situations)."""
+        seqs = Counter()
+        for card in setup.field:
+            loc = _ZONES[card.zone]
+            pos = _POSITIONS[card.position]
+            if loc == K.LOCATION_MZONE and pos == K.POS_FACEDOWN:
+                pos = K.POS_FACEDOWN_DEFENSE
+            seq = seqs[loc]
+            seqs[loc] += 1
+            if seq > 4:
+                raise EngineError(f"too many own cards in {card.zone}")
+            info = ocg.OCGNewCardInfo(0, 0, card.code, 0, loc, seq, pos)
             self.lib.OCG_DuelNewCard(self.handle, C.byref(info))
 
     def _add_opponent(self, setup: StartSetup):
@@ -253,11 +291,11 @@ class Duel:
             pos = _POSITIONS[card.position]
             if loc == K.LOCATION_MZONE and pos == K.POS_FACEDOWN:
                 pos = K.POS_FACEDOWN_DEFENSE
-            if loc == K.LOCATION_HAND:
+            if loc in (K.LOCATION_HAND, K.LOCATION_DECK):
                 pos = K.POS_FACEDOWN_DEFENSE
             seq = seqs[loc]
             seqs[loc] += 1
-            if loc != K.LOCATION_HAND and seq > 4:
+            if loc & K.LOCATION_ONFIELD and seq > 4:
                 raise EngineError(f"too many opponent cards in {card.zone}")
             info = ocg.OCGNewCardInfo(1, 0, card.code, 1, loc, seq, pos)
             self.lib.OCG_DuelNewCard(self.handle, C.byref(info))
@@ -266,7 +304,9 @@ class Duel:
     def advance(self, auto_respond_opponent=None) -> Decision | None:
         """Run the engine until player 0 has to decide. Returns None when the duel ended.
 
-        `auto_respond_opponent(decision) -> bytes` answers decisions of player 1.
+        `auto_respond_opponent(decision) -> bytes` answers decisions of player 1. If it returns None,
+        the opponent's decision is handed to the caller instead (adversarial search): check
+        `decision.player` and answer it with respond().
         """
         if self._pending is not None:
             return self._pending
@@ -286,8 +326,10 @@ class Duel:
             if decision.player != 0:
                 if auto_respond_opponent is None:
                     raise EngineError(f"opponent decision {decision.name} without responder")
-                self.lib.OCG_DuelSetResponse(self.handle, *_buf(auto_respond_opponent(decision)))
-                continue
+                answer = auto_respond_opponent(decision)
+                if answer is not None:
+                    self.lib.OCG_DuelSetResponse(self.handle, *_buf(answer))
+                    continue
             self._pending = decision
             return decision
         return None

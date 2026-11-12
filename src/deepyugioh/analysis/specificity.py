@@ -443,6 +443,34 @@ def _lock_fits(lk: dict, deck: DeckProfile) -> bool:
     return False
 
 
+def deck_profile_from_names(archetypes=(), races=(), attributes=(), consts: dict[str, int] | None = None) -> DeckProfile:
+    """Deck profile from names as in the card scripts' constants ("Blue-Eyes", "Dragon", "LIGHT")."""
+    if consts is None:
+        from deepyugioh.cards.references import constants
+
+        consts = constants()
+
+    def const(prefix, name):
+        key = prefix + name.upper().replace("-", "_").replace(" ", "_").replace('"', "")
+        if key not in consts:
+            close = [k[len(prefix):] for k in consts if k.startswith(prefix) and name.upper().replace(" ", "_") in k][:5]
+            raise KeyError(f"unknown {prefix[:-1].lower()} {name!r}" + (f" (meant: {', '.join(close)}?)" if close else ""))
+        return consts[key]
+
+    arche = frozenset(const("SET_", a) for a in archetypes or ())
+    r = a = 0
+    for x in races or ():
+        r |= const("RACE_", x)
+    for x in attributes or ():
+        a |= const("ATTRIBUTE_", x)
+    return DeckProfile(arche, r, a, ", ".join([*(archetypes or ()), *(races or ()), *(attributes or ())]))
+
+
+def lock_fits(lk: dict, deck: DeckProfile) -> bool:
+    """Does the deck itself fall inside what the restriction allows?"""
+    return _lock_fits(lk, deck)
+
+
 # ---- the axis -------------------------------------------------------------------------------------
 _USED = re.compile(r"^(?:activate\[\d+\]|use|chain|special summon|normal summon|set)\s+(.+?)(?::\s*yes)?$")
 
@@ -456,7 +484,7 @@ class GenericnessAnalyzer:
     def __init__(self, knowledge: EffectKnowledge, profiler: CardProfiler | None = None):
         self.k = knowledge
         self.profiler = profiler or CardProfiler(knowledge)
-        self.version = f"3/{knowledge.version()}"
+        self.version = f"4/{knowledge.version()}"   # 4: forbidden_filters (compatibility)
 
     def prepare(self, combos) -> None:
         pass
@@ -494,7 +522,8 @@ class GenericnessAnalyzer:
                 sig = next(s for s in self.k.signatures(code) if s.effect_id == lk["effect"])
                 lock = next((x for x in sig.locks if (x.kind, x.scope) == (lk["kind"], lk["scope"])), None)
                 out.append({**lk, "card": code, "certain": certain,
-                            "allowed_filters": lock.allowed.to_dict() if lock is not None and lock.allowed else None})
+                            "allowed_filters": lock.allowed.to_dict() if lock is not None and lock.allowed else None,
+                            "forbidden_filters": lock.forbidden.to_dict() if lock is not None and lock.forbidden else None})
         return out
 
     def analyze(self, combo: ComboRecord) -> AxisResult:
@@ -535,4 +564,4 @@ class GenericnessAnalyzer:
 
 
 __all__ = ["CardProfile", "CardProfiler", "CardUniverse", "DeckProfile", "GenericnessAnalyzer", "Names", "deck_fit",
-           "generic_scale"]
+           "deck_profile_from_names", "generic_scale", "lock_fits"]

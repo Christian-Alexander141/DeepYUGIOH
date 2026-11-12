@@ -77,7 +77,7 @@ def test_cost_counts_cards_actions_and_normal_summon():
             ("MSG_SELECT_IDLECMD", "end phase")]
     cheap = CostAnalyzer().analyze(_combo(1, hand=(1,), deck=(2,), line=line, benefit={"lp_gain": -1000}))
     assert cheap.raw == {"cards": 2, "hand": 1, "deck": 1, "extra": 0, "actions": 3, "lp_paid": 1000,
-                         "normal_summon": True}
+                         "normal_summon": True, "resources": 0, "hand_independence": -1}
     dear = CostAnalyzer().analyze(_combo(1, hand=(1, 2, 3), deck=(4,)))
     assert cheap.value > dear.value
 

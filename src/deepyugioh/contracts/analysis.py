@@ -22,6 +22,9 @@ AXES = {
     "cost": "Einsatz: benötigte Karten, Handkarten, Aktionen, LP, Normalbeschwörung",
     "consistency": "Konsistenz: Wahrscheinlichkeit, die nötigen Handkarten zu ziehen (mit Combo-Familie)",
     "genericness": "Deckspezifität: wie allgemein die Combo einsetzbar ist (100 = in jedem Deck, 0 = nur in einem engen Kontext)",
+    "line": "Linienfakten: Beschwörungen und Aktivierungen der Linie, per Engine nachgespielt",
+    "compatibility": "Kompatibilität: Anteil der anderen Combos, mit denen sie im selben Zug spielbar ist",
+    "robustness": "Robustheit: was gegen Handtraps garantiert übrig bleibt, per Engine gesucht",
 }
 
 

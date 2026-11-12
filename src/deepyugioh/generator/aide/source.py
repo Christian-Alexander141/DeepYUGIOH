@@ -34,6 +34,7 @@ from deepyugioh.generator.config import CandidateConfig
 
 AIDE_TIERS = {5: "forward", 6: "backward"}
 HYBRID_TIER = 7
+LATE_TIER = 8
 BASE_TIERS = (1, 2, 3, 4)
 GOAL_ZONES = ("GRAVE", "BANISHED", "MZONE")
 
@@ -188,11 +189,20 @@ class AideCandidateSource:
 class HybridCandidateSource:
     """Tiers 1-4 from the graph source (unchanged), 5/6 from AIDE, 7 interleaves both."""
 
-    def __init__(self, graph_source, aide_factory: Callable[[], AideCandidateSource], share: float = 0.5):
+    def __init__(self, graph_source, aide_factory: Callable[[], AideCandidateSource], share: float = 0.5,
+                 late_factory: Callable[[], object] | None = None):
         self.graph_source = graph_source
         self._aide_factory = aide_factory
+        self._late_factory = late_factory
         self.share = share
         self.duplicates = 0
+
+    @cached_property
+    def late(self):
+        """Tier 8 (later game situations), built on first use."""
+        if self._late_factory is None:
+            raise ValueError("tier 8 needs a late game candidate source")
+        return self._late_factory()
 
     @cached_property
     def aide(self) -> AideCandidateSource:
@@ -202,6 +212,8 @@ class HybridCandidateSource:
         return self.graph_source.version()  # tiers 1-4 keep their cursors
 
     def tier_version(self, tier: int) -> str:
+        if tier == LATE_TIER:
+            return self.late.version()
         if tier in AIDE_TIERS:
             return self.aide.version()
         if tier == HYBRID_TIER:
@@ -210,6 +222,8 @@ class HybridCandidateSource:
         return self.graph_source.version()
 
     def candidates(self, tier: int) -> Iterator[Candidate]:
+        if tier == LATE_TIER:
+            return self.late.candidates(tier)
         if tier in AIDE_TIERS:
             return self.aide.candidates(tier)
         if tier == HYBRID_TIER:
@@ -217,7 +231,7 @@ class HybridCandidateSource:
         return self.graph_source.candidates(tier)
 
     def tier_size(self, tier: int) -> int | None:
-        if tier in AIDE_TIERS or tier == HYBRID_TIER:
+        if tier in AIDE_TIERS or tier in (HYBRID_TIER, LATE_TIER):
             return None
         return self.graph_source.tier_size(tier)
 

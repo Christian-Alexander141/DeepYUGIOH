@@ -21,7 +21,9 @@ from deepyugioh.contracts.setups import StartSetup
 from deepyugioh.engine import constants as K
 from deepyugioh.engine.duel import BoardState, Duel, InvalidResponse
 from deepyugioh.generator.search.actions import Enumerator, Unsupported
-from deepyugioh.generator.search.combo import Benefit, Requirements, activation_tags, benefit, requirements
+from deepyugioh.generator.search.combo import (
+    Benefit, Requirements, activation_tags, benefit, requirements, unused_resources,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,8 @@ class FoundCombo:
     @property
     def signature(self) -> tuple:
         r = self.requirements
+        if r.resources:
+            return (r.hand, r.deck, r.extra, self.identity, r.grave, r.banished, r.field)
         return (r.hand, r.deck, r.extra, self.identity)
 
 
@@ -173,7 +177,7 @@ class ComboSearch:
             self.start_board = board
         self.enum.link_on_field = self._link_on_field(board)
 
-        req = requirements(self.setup.hand, board, duel.events)
+        req = requirements(self.setup, board, duel.events)
         if req.count > self.limits.max_cards:
             self.pruned["too_many_cards"] += 1
             return
@@ -223,7 +227,8 @@ class ComboSearch:
         b = benefit(self.start_board, board)
         if not b.positive:
             return
-        combo = FoundCombo(req, b, list(line), board, board.key(), board.identity(self.start_board, self._link_on_field(board)), turn_ended)
+        identity = board.identity(self.start_board, self._link_on_field(board), unused_resources(self.setup, req))
+        combo = FoundCombo(req, b, list(line), board, board.key(), identity, turn_ended)
         old = self.found.get(combo.signature)
         if old is None or len(combo.line) < len(old.line):
             self.found[combo.signature] = combo

@@ -203,6 +203,13 @@ def parse_event(msg: int, r: Reader) -> Event:
         return Event(msg, {"code": code, "from": r.loc_info(), "to": r.loc_info(), "reason": r.u32()})
     if msg == K.MSG_WIN:
         return Event(msg, {"player": r.u8(), "reason": r.u8()})
+    if msg == K.MSG_DRAW:
+        player, n = r.u8(), r.u32()
+        codes = []
+        for _ in range(n):
+            codes.append(r.u32())
+            r.u32()  # position
+        return Event(msg, {"player": player, "codes": codes})
     return Event(msg, None)
 
 

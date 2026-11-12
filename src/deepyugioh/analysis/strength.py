@@ -35,8 +35,12 @@ DEFAULT_SCORINGS: dict[str, dict] = {
         "label": "Durchbrechen (als Zweiter)",
         "weights": {"outcome.opp_losses": 0.45, "consistency.family_second": 0.25, "cost": 0.15, "outcome": 0.15},
     },
+    "late": {
+        "label": "Späteres Spiel (wenige Handkarten, Ressourcen)",
+        "weights": {"outcome.card_advantage": 0.30, "cost.hand_independence": 0.30, "outcome": 0.25, "robustness": 0.15},
+    },
 }
-BASE_AXES = ("outcome", "cost", "consistency", "genericness", "robustness")
+BASE_AXES = ("outcome", "cost", "consistency", "genericness", "robustness", "compatibility")
 
 
 @dataclass(frozen=True)
@@ -101,7 +105,8 @@ _COMPONENT_LABELS = {
     "outcome": "Ergebnis", "cost": "Einsatz", "consistency": "Konsistenz", "genericness": "Generizität",
     "robustness": "Robustheit", "outcome.disruptions": "Störungen", "outcome.opp_losses": "Verluste des Gegners",
     "consistency.family_first": "Konsistenz als Erster", "consistency.family_second": "Konsistenz als Zweiter",
-    "outcome.negates": "Negates", "outcome.card_advantage": "Kartenvorteil",
+    "outcome.negates": "Negates", "outcome.card_advantage": "Kartenvorteil", "compatibility": "Kompatibilität",
+    "cost.hand_independence": "Unabhängigkeit von der Hand", "cost.resources": "genutzte Ressourcen",
 }
 
 
@@ -138,25 +143,27 @@ class Rescorer:
             s.name: {"label": s.label, "weights": s.weights} for s in self.scorings}}, "rescore", len(signatures))
         written = 0
         for sc in self.scorings:
-            present = {c: w for c, w in sc.weights.items() if c in component and w > 0}
-            missing = sorted(c for c, w in sc.weights.items() if c not in component and w > 0)
-            total = sum(present.values())
-            out = []
+            wanted = {c: w for c, w in sc.weights.items() if w > 0}
+            absent = sorted(c for c in wanted if c not in component)   # no combo has it (axis not analysed yet)
+            out, partial = [], 0
             for sig in signatures:
-                parts = {c: component[c].get(sig) for c in present}
-                used = {c: v for c, v in parts.items() if v is not None}
-                wsum = sum(present[c] for c in used)
+                used = {c: component[c][sig] for c in wanted if c in component and sig in component[c]}
+                wsum = sum(wanted[c] for c in used)
                 if not wsum:
                     continue
-                value = sum(present[c] * v for c, v in used.items()) / wsum
+                # a component this combo has no result for (e.g. robustness not searched yet) is left out
+                # and the other weights are scaled up - the result says so
+                missing = sorted(c for c in wanted if c not in used)
+                partial += bool(missing) and not absent
+                value = sum(wanted[c] * v for c, v in used.items()) / wsum
                 raw = {"components": {c: round(v, 2) for c, v in used.items()},
-                       "weights": {c: round(present[c] / total, 4) for c in used}, "missing": missing,
+                       "weights": {c: round(wanted[c] / wsum, 4) for c in used}, "missing": missing,
                        "label": sc.label}
                 out.append((sig, sc.name, sc.version, raw, round(value, 4), self._explain(sc, value, used, missing)))
             self.repo.replace_axis(sc.name, out, analysis_id)
             self.repo.normalise(sc.name)
             written += len(out)
-            summary[sc.name] = {"combos": len(out), "missing": missing, "version": sc.version}
+            summary[sc.name] = {"combos": len(out), "missing": absent, "partial": partial, "version": sc.version}
         self.repo.finish(analysis_id, written)
         return summary
 

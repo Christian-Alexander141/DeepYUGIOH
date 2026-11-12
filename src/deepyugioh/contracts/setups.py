@@ -15,7 +15,8 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-ZONES = ("mzone", "szone", "hand")
+ZONES = ("mzone", "szone", "hand", "deck")   # deck: for opponents that act (robustness analysis)
+FIELD_ZONES = ("mzone", "szone")
 POSITIONS = ("faceup_attack", "faceup_defense", "facedown_defense", "facedown")
 
 
@@ -28,6 +29,24 @@ class OpponentCard:
     def __post_init__(self):
         if self.zone not in ZONES:
             raise ValueError(f"zone must be one of {ZONES}")
+        if self.position not in POSITIONS:
+            raise ValueError(f"position must be one of {POSITIONS}")
+
+    def to_dict(self) -> dict:
+        return {"code": self.code, "zone": self.zone, "position": self.position}
+
+
+@dataclass(frozen=True)
+class FieldCard:
+    """A card player 0 already controls when the search starts (later game situations)."""
+
+    code: int
+    zone: str = "mzone"
+    position: str = "faceup_attack"
+
+    def __post_init__(self):
+        if self.zone not in FIELD_ZONES:
+            raise ValueError(f"zone must be one of {FIELD_ZONES}")
         if self.position not in POSITIONS:
             raise ValueError(f"position must be one of {POSITIONS}")
 
@@ -63,10 +82,16 @@ class StartSetup:
     starting_lp: int = 8000
     master_rule: int = 5
     branch_zones: bool = False  # branch over monster zones (needed for Link arrows)
+    # later game situations (Stufe 2, step 2.9): what player 0 already has. Empty zones are not
+    # serialised, so the id of every setup without them is unchanged.
+    grave: tuple[int, ...] = ()
+    banished: tuple[int, ...] = ()
+    field: tuple[FieldCard, ...] = ()
 
     def __post_init__(self):
-        for name in ("hand", "deck", "extra"):
+        for name in ("hand", "deck", "extra", "grave", "banished"):
             object.__setattr__(self, name, tuple(sorted(getattr(self, name))))
+        object.__setattr__(self, "field", tuple(sorted(self.field, key=lambda c: (c.zone, c.code, c.position))))
         if self.master_rule != 5:
             raise ValueError("only Master Rule 5 is supported")
 
@@ -80,7 +105,15 @@ class StartSetup:
             "opponent": self.opponent.to_dict(), "seed": list(self.seed),
             "starting_lp": self.starting_lp, "master_rule": self.master_rule,
             "branch_zones": self.branch_zones,
+            **({"grave": list(self.grave)} if self.grave else {}),
+            **({"banished": list(self.banished)} if self.banished else {}),
+            **({"field": [c.to_dict() for c in self.field]} if self.field else {}),
         }
+
+    @property
+    def late(self) -> bool:
+        """Starts from a later game situation (resources in the GY, banished or on the field)."""
+        return bool(self.grave or self.banished or self.field)
 
     @classmethod
     def from_dict(cls, d: dict) -> "StartSetup":
@@ -89,6 +122,8 @@ class StartSetup:
             opponent=OpponentBoard.from_dict(d["opponent"]) if "opponent" in d else EMPTY_BOARD,
             seed=tuple(d.get("seed", (1, 2, 3, 4))), starting_lp=d.get("starting_lp", 8000),
             master_rule=d.get("master_rule", 5), branch_zones=d.get("branch_zones", False),
+            grave=tuple(d.get("grave", ())), banished=tuple(d.get("banished", ())),
+            field=tuple(FieldCard(**c) for c in d.get("field", ())),
         )
 
 

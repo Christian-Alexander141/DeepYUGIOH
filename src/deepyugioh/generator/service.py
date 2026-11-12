@@ -144,8 +144,19 @@ class ComboGenerator:
             graph_source = GraphCandidateSource(
                 self.graph, self.pool, self.config.candidates, self.config.boards(self.pool)
             )
-            self._source = HybridCandidateSource(graph_source, self._aide_source, self.config.candidates.aide_share)
+            self._source = HybridCandidateSource(graph_source, self._aide_source, self.config.candidates.aide_share,
+                                                 late_factory=lambda: self._late_source(graph_source))
         return self._source
+
+    def _late_source(self, graph_source):
+        """Tier 8 (later game situations), built on first use only."""
+        from deepyugioh.generator.lategame import LateGameCandidateSource
+
+        if self._knowledge is None:
+            from deepyugioh.cards.signatures import SignatureStore
+
+            self._knowledge = SignatureStore()
+        return LateGameCandidateSource(self._knowledge, self.graph, self.pool, graph_source, self.config.candidates.late_zones)
 
     def _aide_source(self):
         """Built on first use of tier 5, 6 or 7 only."""
